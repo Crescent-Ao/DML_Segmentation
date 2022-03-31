@@ -9,9 +9,10 @@ import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch
+from torch.utils.data import DataLoader
 from .pspnet import Res_pspnet, BasicBlock, Bottleneck
 import tqdm
+from dataset.RGBT import *
 class Trainer:
     def __init__(self,cfg):
         # Todo：目前仅仅是单卡的版本，多卡版本应该是可见光一个模型，红外一个模型
@@ -30,7 +31,10 @@ class Trainer:
         self.thermal.cuda()
         self.visible.cuda()
         # Todo: DataLoader部分还没写
-        self.dataloader = dataloader()
+        self.train_loader = DataLoader(MSDataSet(cfg=self.cfg,mode='train'),batch_size = cfg.train_batch,num_worker = 4,\
+            pin_memory=True)
+        self.train_loader = DataLoader(MSDataSet(cfg=self.cfg,mode='train'),batch_size = cfg.test_batch,num_worker = 4,\
+            pin_memory=True)
         self.v_loss = 0.0
         self.t_loss = 0.0
         self.pi_v_t = 0.0

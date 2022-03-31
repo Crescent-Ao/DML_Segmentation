@@ -70,30 +70,24 @@ class Trainer:
             thermal_loss = 0.0
             # Todo: Holistic Loss,下面是红外网络的Demo
             BCE_thermal = self.criterion(predict_thermal,mask,is_target_scattered = False)
-            self.t_loss += BCE_thermal.item()
+            losses[0].update(BCE_thermal.item(),self.cfg.train_batch)
             KL_loss = self.criterion_pixel(predict_thermal,predict_rgb,is_target_scattered = False)
-            self.pi_t_v += KL_loss.item()
+            losses[1].update(KL_loss.item(),self.cfg.train_batch)
             Pa_loss = self.criterion_pair_wise(predict_thermal,predict_rgb, is_target_scattered = True)
-            self.pa_t_v = Pa_loss.item()
+            losses[2].update(Pa_loss.item(),self.cfg.train_batch)
             thermal_loss = BCE_thermal*self.cfg.thermal.lambda_1+\
             KL_loss*self.cfg.thermal.lambda_2+Pa_loss*self.cfg.thermal.lambda_3
-            self.tensor_writer.add_scalar('Thermal_loss/BCE_Thermal',self.t_loss,epoch)
-            self.tensor_writer.add_scalar('Thermal_loss/KL_loss',self.pi_t_v,epoch)
-            self.tensor_writer.add_scalar('Thermal_loss/pa_loss',self.pa_t_v,epoch)
-            self.tensor_writer.add_scalar('Thermal_loss/Concat_loss',thermal_loss)
+            losses[3].update(thermal_loss.item(),self.cfg.train_batch)
             # Todo: 可见光网络的Loss
-            BCE_visble = self.criterion(predict_thermal,mask,is_target_scattered = False)
-            self.v_loss = BCE_visble.item()
+            BCE_visible = self.criterion(predict_thermal,mask,is_target_scattered = False)
+            losses[4].update(BCE_visible.item(),self.cfg.train_batch)
             KL_loss_2 = self.criterion_pixel(predict_thermal,predict_rgb,is_target_scattered = False)
-            self.pi_v_t = KL_loss_2.item()
+            losses[5].update(KL_loss_2.item(),self.cfg.train_batch)
             Pa_loss_2 = self.criterion_pair_wise(predict_thermal,predict_rgb, is_target_scattered = True)
-            self.pa_v_t = Pa_loss_2.item()
-            visible_loss = BCE_visble*self.cfg.visible.lambda_1+\
+            losses[6].update(Pa_loss_2.item(),self.cfg.train_batch)
+            visible_loss = BCE_visible*self.cfg.visible.lambda_1+\
             KL_loss_2*self.cfg.visible.lambda_2+Pa_loss_2*self.cfg.visible.lambda_3
-            self.tensor_writer.add_scalar('Visible_loss/BCE_Thermal',self.v_loss,epoch)
-            self.tensor_writer.add_scalar('Visible_loss/KL_loss',self.pi_v_t,epoch)
-            self.tensor_writer.add_scalar('Visible_loss/pa_loss',self.pa_v_t,epoch)
-            self.tensor_writer.add_scalar('Visible_loss/Concat_loss',visible_loss)
+            losses[7].update(visible_loss.item(),self.cfg.train_batch)
             ## 红外反向传播
             self.t_solver.zero_grad()
             thermal_loss.backward()
@@ -104,6 +98,11 @@ class Trainer:
             visible_loss.backward()
             self.v_solver.step()
             self.v_scheduler.step(len(self.dataloader)*epoch + batch_index)
-            ## 
-
-    
+        self.tensor_writer.add_scalar('Thermal_loss/BCE_Thermal',losses[0].avg,epoch)
+        self.tensor_writer.add_scalar('Thermal_loss/KL_loss',losses[1].avg,epoch)
+        self.tensor_writer.add_scalar('Thermal_loss/pa_loss',losses[2].avg,epoch)
+        self.tensor_writer.add_scalar('Thermal_loss/Concat_loss',losses[3].avg,epoch)
+        self.tensor_writer.add_scalar('Visible_loss/BCE_Thermal',losses[4].avg,epoch)
+        self.tensor_writer.add_scalar('Visible_loss/KL_loss',losses[5].avg,epoch)
+        self.tensor_writer.add_scalar('Visible_loss/pa_loss',losses[6].avg,epoch)
+        self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)

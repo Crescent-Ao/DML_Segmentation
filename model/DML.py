@@ -98,11 +98,17 @@ class Trainer:
             visible_loss.backward()
             self.v_solver.step()
             self.v_scheduler.step(len(self.dataloader)*epoch + batch_index)
+        self.logger.info('Epoch {}: Thermal  BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:'.format(\
+            epoch,losses[0].avg,losses[1].avg,losses[2].avg,losses[3].avg))
         self.tensor_writer.add_scalar('Thermal_loss/BCE_Thermal',losses[0].avg,epoch)
         self.tensor_writer.add_scalar('Thermal_loss/KL_loss',losses[1].avg,epoch)
         self.tensor_writer.add_scalar('Thermal_loss/pa_loss',losses[2].avg,epoch)
         self.tensor_writer.add_scalar('Thermal_loss/Concat_loss',losses[3].avg,epoch)
-        self.tensor_writer.add_scalar('Visible_loss/BCE_Thermal',losses[4].avg,epoch)
+        self.logger.info('Epoch {}: Visible BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:'.format(\
+            epoch,losses[0].avg,losses[1].avg,losses[2].avg,losses[3].avg))
+        self.tensor_writer.add_scalar('Visible_loss/BCE_Visible',losses[4].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/KL_loss',losses[5].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/pa_loss',losses[6].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)
+    
+    def 

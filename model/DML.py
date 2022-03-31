@@ -3,6 +3,7 @@ from cProfile import label
 from cmath import inf
 from .loss import *
 from utils.config import *
+from utils.utils import *
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.autograd as autograd
@@ -11,10 +12,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from .pspnet import Res_pspnet, BasicBlock, Bottleneck
+from torch.utils.tensorboard import SummaryWriter
 import tqdm
+from utils.logging import get_logger
 from dataset.RGBT import *
+seed = 42
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 class Trainer:
-    def __init__(self,cfg):
+    def __init__(self,cfg,log_path):
         # Todo：目前仅仅是单卡的版本，多卡版本应该是可见光一个模型，红外一个模型
         self.cfg = cfg
         self.visible = Res_pspnet(cfg.visible.Block,cfg.visible.Block_num,num_classes= cfg.classes)
@@ -35,6 +42,8 @@ class Trainer:
             pin_memory=True)
         self.train_loader = DataLoader(MSDataSet(cfg=self.cfg,mode='train'),batch_size = cfg.test_batch,num_worker = 4,\
             pin_memory=True)
+        self.logger = get_logger(log_file=log_path)
+        self.tensor_writer = SummaryWriter(log_dir = log_path,comment = 'QAQ')
         self.v_loss = 0.0
         self.t_loss = 0.0
         self.pi_v_t = 0.0
@@ -45,9 +54,12 @@ class Trainer:
         self.pa_G_loss = 0.0    
         cudnn.benchmark = True
     def training(self,epoch):
+        
         self.visible.train()
         self.thermal.train()
         # 切换到训练模式 
+        ## Todo 创建一个列表生成器记录单个Epoch 所有的Loss
+        losses =[ AverageMeter() for i in range(8)]
         tbar = tqdm(enumerate(self.dataloader))
         for batch_index,(rgb_img,infrared_img,mask) in tbar:
             rgb_img = rgb_img.cuda()
@@ -58,13 +70,17 @@ class Trainer:
             thermal_loss = 0.0
             # Todo: Holistic Loss,下面是红外网络的Demo
             BCE_thermal = self.criterion(predict_thermal,mask,is_target_scattered = False)
-            self.t_loss = BCE_thermal.item()
+            self.t_loss += BCE_thermal.item()
             KL_loss = self.criterion_pixel(predict_thermal,predict_rgb,is_target_scattered = False)
-            self.pi_t_v = KL_loss.item()
+            self.pi_t_v += KL_loss.item()
             Pa_loss = self.criterion_pair_wise(predict_thermal,predict_rgb, is_target_scattered = True)
             self.pa_t_v = Pa_loss.item()
             thermal_loss = BCE_thermal*self.cfg.thermal.lambda_1+\
             KL_loss*self.cfg.thermal.lambda_2+Pa_loss*self.cfg.thermal.lambda_3
+            self.tensor_writer.add_scalar('Thermal_loss/BCE_Thermal',self.t_loss,epoch)
+            self.tensor_writer.add_scalar('Thermal_loss/KL_loss',self.pi_t_v,epoch)
+            self.tensor_writer.add_scalar('Thermal_loss/pa_loss',self.pa_t_v,epoch)
+            self.tensor_writer.add_scalar('Thermal_loss/Concat_loss',thermal_loss)
             # Todo: 可见光网络的Loss
             BCE_visble = self.criterion(predict_thermal,mask,is_target_scattered = False)
             self.v_loss = BCE_visble.item()
@@ -74,6 +90,10 @@ class Trainer:
             self.pa_v_t = Pa_loss_2.item()
             visible_loss = BCE_visble*self.cfg.visible.lambda_1+\
             KL_loss_2*self.cfg.visible.lambda_2+Pa_loss_2*self.cfg.visible.lambda_3
+            self.tensor_writer.add_scalar('Visible_loss/BCE_Thermal',self.v_loss,epoch)
+            self.tensor_writer.add_scalar('Visible_loss/KL_loss',self.pi_v_t,epoch)
+            self.tensor_writer.add_scalar('Visible_loss/pa_loss',self.pa_v_t,epoch)
+            self.tensor_writer.add_scalar('Visible_loss/Concat_loss',visible_loss)
             ## 红外反向传播
             self.t_solver.zero_grad()
             thermal_loss.backward()

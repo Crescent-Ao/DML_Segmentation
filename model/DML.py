@@ -111,4 +111,5 @@ class Trainer:
         self.tensor_writer.add_scalar('Visible_loss/pa_loss',losses[6].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)
     
-    def 
+    def validation(self,epoch):
+        pass

@@ -2,7 +2,6 @@ from importlib import import_module
 import sys
 import os.path as osp
 import os
-sys.path.insert(0,osp.join(os.getcwd(),'Config'))
-a = import_module('dml_esp')
-for key,value in a.__dict__.items():
-    print(key,value)
+from utils.config import *
+a = Config.fromfile(r'/home/wa/DML_Segmentation/Config/dml_esp.py')
+a.thermal

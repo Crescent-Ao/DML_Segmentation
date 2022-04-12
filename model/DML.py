@@ -93,7 +93,7 @@ class Trainer:
             thermal_loss.backward()
             self.t_solver.step()
             self.t_scheduler.step(len(self.dataloader)*epoch + batch_index)
-            ## 可见光反向传播
+            ## 可见光反向传播  
             self.v_solver.zero_grad()
             visible_loss.backward()
             self.v_solver.step()

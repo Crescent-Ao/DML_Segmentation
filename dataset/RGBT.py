@@ -35,6 +35,8 @@ class MSDataSet(Dataset):
                 A.VerticalFlip(p=0.5),
                 A.RandomRotate90(p=0.5),
                 A.Transpose(p=0.5),
+                ### Todo RandomCrop
+                ### Todo CutMix @圈圈师姐
             ]
             )
         self.transform = torchvision.transforms(
@@ -57,7 +59,7 @@ class MSDataSet(Dataset):
         infrared = self.transform(infrared).permute(-1,0,1)
         return rgb_img,infrared,mask
         # Todo 随机剪裁和多尺度测试还没有做
-        # 前三个波段为对应的rgb 波段 后面为对应的可见光波段
+        # 前三个波段为对应的rgb 波段 后面为对应的可见光波段,Multi-sca
 
     def __len__(self):
         return len(self.cur_list)

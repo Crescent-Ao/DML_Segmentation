@@ -1,4 +1,5 @@
-# 😽😽😽Deep Mutual Learning for Segmentation
+# 及时Pull request 防止单个轮子重复造
+## 😽😽😽Deep Mutual Learning for Segmentation
 这个是互学习机制在跨域数据集上的探索，常见的跨模态融合的方式，无非以下三种方式
 - 第一种 RGB+Thermal 直接在输入维度上进行concat的操作的方式
 - 第二种 红外端 可见光端放上两个骨架网络作为特征提取的手段，然后再利用中间某个模块相融合

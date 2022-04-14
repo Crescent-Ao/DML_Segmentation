@@ -1,6 +1,6 @@
 # Demo测试，为了简化代码这个目前仅仅支持单卡的版本
 from cProfile import label
-from cmath import inf
+from cmath import cos, inf
 from .loss import *
 from utils.config import *
 from utils.utils import *
@@ -63,6 +63,8 @@ class Trainer:
         self.thermal.train()
         # 切换到训练模式 
         ## Todo 创建一个列表生成器记录单个Epoch 所有的Loss
+        if self.cfg.cps_flag:
+            cps_avg = AverageMeter()
         losses =[ AverageMeter() for i in range(8)]
         tbar = tqdm(enumerate(self.dataloader))
         for batch_index,(rgb_img,infrared_img,mask) in tbar:
@@ -92,8 +94,15 @@ class Trainer:
             visible_loss = BCE_visible*self.cfg.visible.lambda_1+\
             KL_loss_2*self.cfg.visible.lambda_2+Pa_loss_2*self.cfg.visible.lambda_3
             losses[7].update(visible_loss.item(),self.cfg.train_batch)
+            if(self.cfg.cps_flag):
+               cps_loss = self.cps_loss(predict_rgb,predict_thermal)
+               thermal_loss = thermal_loss + cps_loss
+               visible_loss = visible_loss + cps_loss
+               cps_avg.update(cps_loss.item(),self.cfg.train_batch)
+               self.tensor_writer.add_scalar('cps loss',)
             ## 红外反向传播
             self.t_solver.zero_grad()
+            
             thermal_loss.backward()
             self.t_solver.step()
             self.t_scheduler.step(len(self.dataloader)*epoch + batch_index)
@@ -109,11 +118,14 @@ class Trainer:
         self.tensor_writer.add_scalar('Thermal_loss/pa_loss',losses[2].avg,epoch)
         self.tensor_writer.add_scalar('Thermal_loss/Concat_loss',losses[3].avg,epoch)
         self.logger.info('Epoch {}: Visible BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:'.format(\
-            epoch,losses[0].avg,losses[1].avg,losses[2].avg,losses[3].avg))
+            epoch,losses[4].avg,losses[5].avg,losses[6].avg,losses[7].avg))
         self.tensor_writer.add_scalar('Visible_loss/BCE_Visible',losses[4].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/KL_loss',losses[5].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/pa_loss',losses[6].avg,epoch)
-        self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)
+        self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)   
+        if(self.cfg.cps_flag):
+            self.tensor_writer.add_scalar('cps loss',cps_avg.avg,epoch)
+            self.logger.info('Epoch{}: Cps loss{.10f}'.format(epoch,cps_avg.avg))
     def cps_loss(self,predict_rgb,predict_thermal):
         ## CVPR 2021 半监督伪标签代码的实现
         pre_rgb = predict_rgb[0]

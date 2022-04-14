@@ -52,7 +52,6 @@ def calculate_accuracy(logits, labels):
     acc = count.float() / (labels.numel()-no_count).float()
     return acc
 
-########miou
 def calculate_meaniou(num_class, logits, labels):
     unique_labels = np.unique(labels)
 

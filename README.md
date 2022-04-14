@@ -11,8 +11,13 @@
 ## 参考代码(结构知识蒸馏)[https://github.com/irfanICMLL/structure_knowledge_distillation]
 ## Cfg
 cfg 最简单的配置文件，目前已支持.py文件的解析功能，全局解析 3.28完成
+配置文件所有的Lambda 系列全部改成pi/pa/cps/bce 以便更加方便地调整
+## loss
+loss 新增半监督cps范式，
 ## logger
 log 也是采用mmcv中方式，
 ## Dataset
 数据增强有一些问题，圈姐可以加一个多尺度训练类似的
 ## Eval 部分
+之前说DML_Segmentation 范式，后端也可以加决策融合的方式，根据光照条件自动调整对应输出
+当然也可以单个网络的输入

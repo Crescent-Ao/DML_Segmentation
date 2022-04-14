@@ -12,8 +12,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from .pspnet import Res_pspnet, BasicBlock, Bottleneck
+import pandas as pd
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
+import numpy as np
 from utils.logging import get_logger
 from dataset.RGBT import *
 seed = 42
@@ -35,6 +37,8 @@ class Trainer:
         self.criterion = CriterionDSN() # BCE
         self.criterion_pixel = CriterionPixelWise()
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale = cfg.pool_scale, feat_ind=-5)
+        # 引入CPS loss
+        self.criterion_cps = nn.CrossEntropyLoss(reduction='mean',ignore_index=255)
         self.thermal.cuda()
         self.visible.cuda()
         # Todo: DataLoader部分还没写
@@ -79,9 +83,9 @@ class Trainer:
             KL_loss*self.cfg.thermal.lambda_2+Pa_loss*self.cfg.thermal.lambda_3
             losses[3].update(thermal_loss.item(),self.cfg.train_batch)
             # Todo: 可见光网络的Loss
-            BCE_visible = self.criterion(predict_thermal,mask,is_target_scattered = False)
+            BCE_visible = self.criterion(predict_rgb,mask,is_target_scattered = False)
             losses[4].update(BCE_visible.item(),self.cfg.train_batch)
-            KL_loss_2 = self.criterion_pixel(predict_thermal,predict_rgb,is_target_scattered = False)
+            KL_loss_2 = self.criterion_pixel(predict_rgb,predict_rgb,is_target_scattered = False)
             losses[5].update(KL_loss_2.item(),self.cfg.train_batch)
             Pa_loss_2 = self.criterion_pair_wise(predict_thermal,predict_rgb, is_target_scattered = True)
             losses[6].update(Pa_loss_2.item(),self.cfg.train_batch)
@@ -110,6 +114,13 @@ class Trainer:
         self.tensor_writer.add_scalar('Visible_loss/KL_loss',losses[5].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/pa_loss',losses[6].avg,epoch)
         self.tensor_writer.add_scalar('Visible_loss/Concat_loss',losses[7].avg,epoch)
-    
+    def cps_loss(self,predict_rgb,predict_thermal):
+        ## CVPR 2021 半监督伪标签代码的实现
+        pre_rgb = predict_rgb[0]
+        pre_thermal = predict_thermal[0]
+        _,maxr = torch.max(predict_rgb,dim=1)
+        _,maxt = torch.max(predict_thermal,1)
+        cps_loss = self.criterion_cps(pre_rgb,maxt)+self.criterion_cps(pre_thermal,maxr)
+        return cps_loss
     def validation(self,epoch):
         pass

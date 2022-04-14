@@ -20,8 +20,10 @@ loss 新增半监督cps范式，
 log 也是采用mmcv中方式，
 ## Dataset
 数据增强有一些问题，圈姐可以加一个多尺度训练类似的
-好的兄弟，我来了
 ## Eval 部分
 之前说DML_Segmentation 范式，后端也可以加决策融合的方式，根据光照条件自动调整对应输出
 当然也可以单个网络的输入
+
+1、（不知道是不是这个意思）
+一种极其简单到发指的most-sure策略：https://ieeexplore.ieee.org/document/8897705
 

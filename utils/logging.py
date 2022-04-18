@@ -1,13 +1,13 @@
 import logging
 import os.path as osp
-## 
+
 
 import torch.distributed as dist
 
 logger_initialized = {}
 
 
-def get_logger(name, log_file=None, log_level=logging.INFO, file_mode='w'):
+def get_logger(name, log_file=None, log_level=logging.INFO, file_mode="w"):
     """Initialize and get a logger by name.
     If the logger has not been initialized, this method will initialize the
     logger by adding one or two handlers, otherwise the initialized logger will
@@ -60,12 +60,11 @@ def get_logger(name, log_file=None, log_level=logging.INFO, file_mode='w'):
         # Here, the default behaviour of the official logger is 'a'. Thus, we
         # provide an interface to change the file mode to the default
         # behaviour.
-        log_file = osp.join(log_file,'log.txt')
+        log_file = osp.join(log_file, "log.txt")
         file_handler = logging.FileHandler(log_file, file_mode)
         handlers.append(file_handler)
 
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     for handler in handlers:
         handler.setFormatter(formatter)
         handler.setLevel(log_level)
@@ -97,12 +96,12 @@ def print_log(msg, logger=None, level=logging.INFO):
         print(msg)
     elif isinstance(logger, logging.Logger):
         logger.log(level, msg)
-    elif logger == 'silent':
+    elif logger == "silent":
         pass
     elif isinstance(logger, str):
         _logger = get_logger(logger)
         _logger.log(level, msg)
     else:
         raise TypeError(
-            'logger should be either a logging.Logger object, str, '
-            f'"silent" or None, but got {type(logger)}')
+            "logger should be either a logging.Logger object, str, " f'"silent" or None, but got {type(logger)}'
+        )

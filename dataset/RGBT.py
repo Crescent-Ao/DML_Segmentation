@@ -28,7 +28,7 @@ class MSDataSet(Dataset):
         self.cfg = cfg  # 传入全局cfg文件
         self.mode = mode
         self.image_path = osp.join(cfg.dataset, "images")
-        self.mask_path = osp.join(cfg.dataset, "masks")
+        self.mask_path = osp.join(cfg.dataset, "labels")
         cur_file = open(osp.join(cfg.dataset, mode + ".txt"))
         # 根据Mode 选择对应的方式
         self.cur_list = list(map(lambda x: x.rstrip("\n"), cur_file.readlines()))
@@ -57,8 +57,8 @@ class MSDataSet(Dataset):
         # 最最最简单的数据增强的实现
 
     def __getitem__(self, index):
-        img = Image.open(osp.join(self.image_path, self.cur_list[index]))
-        mask = Image.open(osp.join(self.mask_path, self.cur_list[index]))
+        img = Image.open(osp.join(self.image_path, self.cur_list[index] + ".png"))
+        mask = Image.open(osp.join(self.mask_path, self.cur_list[index] + ".png"))
         if self.mode == "train":
             augumentation = self.augtransform_train(image=img, mask=mask)
             img = augumentation["image"]

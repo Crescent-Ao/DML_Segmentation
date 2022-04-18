@@ -5,6 +5,9 @@ dataset = '/home/guoshibo/ir_seg_dataset/'
 momentum = 0.9
 weight_decay = 1e-4
 cps_flag = True
+ckpt_freq = 10
+self_branch_epochs = 20
+DML_epochs = 100
 visible = {
     "Block": "Bottleneck",
     "Block_num": [3, 4, 23, 3],
@@ -26,3 +29,5 @@ thermal = {
 pool_scale = 5
 train_batch = 8
 test_batch = 1
+height = 480
+width = 640

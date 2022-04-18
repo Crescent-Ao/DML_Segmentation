@@ -9,7 +9,7 @@ from torch.autograd import Variable
 affine_par = True
 import functools
 import sys, os
-from libs import InPlaceABN, InPlaceABNSync
+from libs.functions import InPlaceABNSync
 
 BatchNorm2d = functools.partial(InPlaceABNSync, activation="none")
 

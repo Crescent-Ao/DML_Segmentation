@@ -2,7 +2,7 @@ import torch.autograd as autograd
 import torch.cuda.comm as comm
 from torch.autograd.function import once_differentiable
 
-from . import _ext
+# from . import _ext
 
 # Activation names
 ACT_LEAKY_RELU = "leaky_relu"

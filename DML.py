@@ -1,9 +1,9 @@
 # Demo测试，为了简化代码这个目前仅仅支持单卡的版本
 from cProfile import label
 from cmath import cos, inf
-from loss import CriterionDSN, CriterionPixelWise, CriterionPairWiseforWholeFeatAfterPool
+from model.loss import CriterionDSN, CriterionPixelWise, CriterionPairWiseforWholeFeatAfterPool
 from utils.config import ConfigDict
-from utils.utils import AverageMeter
+from utils.utils import AverageMeter, mkdir_exp, save_ckpt
 from utils.config import Config
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
@@ -12,13 +12,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from pspnet import Res_pspnet
+
+# from pspnet import Res_pspnet
 import torch
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 import numpy as np
 from utils.logging import get_logger
 from dataset.RGBT import MSDataSet
+from model.Unet import UNet
+import os
 
 seed = 42
 np.random.seed(seed)
@@ -30,8 +33,10 @@ class Trainer:
     def __init__(self, cfg, log_path):
         # Todo：目前仅仅是单卡的版本，多卡版本应该是可见光一个模型，红外一个模型
         self.cfg = cfg
-        self.visible = Res_pspnet(cfg.visible.Block, cfg.visible.Block_num, num_classes=cfg.classes)
-        self.thermal = Res_pspnet(cfg.thermal.Block, cfg.thermal.Block_num, num_classes=cfg.classes)
+        # self.visible = Res_pspnet(cfg.visible.Block, cfg.visible.Block_num, num_classes=cfg.classes)
+        # self.thermal = Res_pspnet(cfg.thermal.Block, cfg.thermal.Block_num, num_classes=cfg.classes)
+        self.visible = UNet(3, n_classes=cfg.classes)
+        self.thermal = UNet(3, n_classes=cfg.classes)
         # Todo: 对抗学习策略目前还没有采用，只初始化了两个迭代器
         self.v_solver = optim.SGD(
             [{"params": filter(lambda p: p.requires_grad, self.visible.parameters()), "initial_lr": cfg.lr_v}],
@@ -40,7 +45,7 @@ class Trainer:
             weight_decay=cfg.weight_decay,
         )
         self.v_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            self.v_solver, T_0=cfg.visbile.T_0, T_mult=cfg.visbile.T_mult, verbose=False
+            self.v_solver, T_0=cfg.visible.T_0, T_mult=cfg.visible.T_mult,
         )
         self.t_solver = optim.SGD(
             [{"params": filter(lambda p: p.requires_grad, self.thermal.parameters()), "initial_lr": cfg.lr_t}],
@@ -49,7 +54,7 @@ class Trainer:
             weight_decay=cfg.weight_decay,
         )
         self.t_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult, verbose=False
+            self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
         self.criterion = CriterionDSN()  # BCE
@@ -61,10 +66,10 @@ class Trainer:
         self.visible.cuda()
         # Todo: DataLoader部分还没写
         self.train_loader = DataLoader(
-            MSDataSet(cfg=self.cfg, mode="train"), batch_size=cfg.train_batch, num_worker=4, pin_memory=True
+            MSDataSet(cfg=self.cfg, mode="train"), batch_size=cfg.train_batch, num_workers=4, pin_memory=True
         )
         self.test_loader = DataLoader(
-            MSDataSet(cfg=self.cfg, mode="test"), batch_size=cfg.test_batch, num_worker=4, pin_memory=True
+            MSDataSet(cfg=self.cfg, mode="test"), batch_size=cfg.test_batch, num_workers=4, pin_memory=True
         )
         self.logger = get_logger("DML", log_file=log_path)
         self.tensor_writer = SummaryWriter(log_dir=log_path, comment="QAQ")
@@ -231,10 +236,10 @@ class Trainer:
                 BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
                 losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
-        self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
-        self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
-        self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
-        self.tensor_writer.add_scalar("train_self_branch:Visible_loss/BCE_Visible", losses[1].avg, epoch)
+        self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
+        self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
+        self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
+        self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
 
     def validation(self, epoch):
         pass
@@ -243,3 +248,25 @@ class Trainer:
 def main():
     cfg = Config.fromfile(r"/home/guoshibo/DML_Segmentation/Config/dml_esp.py")
     print(cfg)
+    start_epoch = 0
+    ckpt_path = mkdir_exp("ckpt")
+    weight_path = mkdir_exp("weights")
+    log_path = mkdir_exp("log")
+    trainer = Trainer(cfg, log_path=log_path)
+
+    for epoch in range(start_epoch, cfg.self_branch_epochs):
+        trainer.train_self_branch(epoch)
+
+
+    for epoch in range(start_epoch, cfg.epochs):
+        trainer.DML_training(epoch)
+        if epoch % trainer.cfg.ckpt_freq == 0:
+            save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
+            torch.save(trainer.visible.state_dict(), os.path.join(os.path.join(weight_path, "weight_visible_%s.pth" % (str(epoch)))))
+            torch.save(trainer.thermal.state_dict(), os.path.join(os.path.join(weight_path, "weight_thermal_%s.pth" % (str(epoch)))))
+
+        trainer.testing(epoch)
+
+
+if __name__ == "__main__":
+    main()

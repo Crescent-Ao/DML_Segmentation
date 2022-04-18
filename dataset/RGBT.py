@@ -3,7 +3,6 @@ from torch.utils.data import Dataset
 import cv2 as cv2
 import PIL.Image as Image
 import numpy as np
-
 import pandas as pd
 import torchvision
 import os
@@ -16,6 +15,10 @@ from tqdm import trange
 """
     传入全局cfg文件
 """
+
+
+def isfilp(x):
+    return not x.endswith("flip")
 
 
 class MSDataSet(Dataset):
@@ -33,9 +36,11 @@ class MSDataSet(Dataset):
         cur_file = open(osp.join(cfg.dataset, mode + ".txt"))
         # 根据Mode 选择对应的方式
         self.cur_list = list(map(lambda x: x.rstrip("\n"), cur_file.readlines()))
+        self.cur_list = list(filter(isfilp, self.cur_list))
+        print(mode, len(self.cur_list))
         self.augtransform_train = A.Compose(
             [
-                A.Resize(height=cfg.height, width=cfg.width, interpolation=cv2.INTER_CUBIC, p=1),
+                # A.Resize(height=cfg.height, width=cfg.width, interpolation=cv2.INTER_CUBIC, p=1),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
                 A.RandomRotate90(p=0.5),
@@ -54,16 +59,18 @@ class MSDataSet(Dataset):
                 # Todo CutMix @圈圈师姐
             ]
         )
-        self.transform = torchvision.transforms([torchvision.transforms.ToTensor()])
+        self.transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
         # 最最最简单的数据增强的实现
 
     def __getitem__(self, index):
-        img = Image.open(osp.join(self.image_path, self.cur_list[index] + ".png"))
-        mask = Image.open(osp.join(self.mask_path, self.cur_list[index] + ".png"))
+        img = np.array(Image.open(osp.join(self.image_path, self.cur_list[index] + ".png")))
+        mask = np.array(Image.open(osp.join(self.mask_path, self.cur_list[index] + ".png")))
+        augumentation = A.Compose([])
+        print(self.cur_list[index])
         if self.mode == "train":
             augumentation = self.augtransform_train(image=img, mask=mask)
-            img = augumentation["image"]
-            mask = augumentation["mask"]
+        img = augumentation["image"]
+        mask = augumentation["mask"]
         # elif self.mode == "test":
         #     augumentation = self.augtransform_test(image=img, mask=mask)
         rgb_img = img[:, :, :3]
@@ -72,6 +79,9 @@ class MSDataSet(Dataset):
         # 在这个尺度上进行对应的concate操作
         rgb_img = self.transform(img).permute(-1, 0, 1)
         infrared = self.transform(infrared).permute(-1, 0, 1)
+        mask = self.transform(mask)
+
+
         return rgb_img, infrared, mask
         # Todo 随机剪裁和多尺度测试还没有做
         # 前三个波段为对应的rgb 波段 后面为对应的可见光波段,Multi-sca

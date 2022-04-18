@@ -1,9 +1,9 @@
 classes = 9
 lr_v = 1e-4
 lr_t = 1e-4
-dataset =
-momentum =
-weight_decay =
+dataset = '/home/guoshibo/ir_seg_dataset/'
+momentum = 0.9
+weight_decay = 1e-4
 cps_flag = True
 visible = {
     "Block": "Bottleneck",

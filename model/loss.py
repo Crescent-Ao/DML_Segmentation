@@ -6,7 +6,7 @@ import numpy as np
 from torch.nn import functional as F
 from torch.autograd import Variable
 import scipy.ndimage as nd
-from utils.utils import sim_dis_compute
+# from utils.utils import sim_dis_compute
 
 """
  @irfanICMLL

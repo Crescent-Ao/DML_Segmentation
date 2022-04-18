@@ -1,9 +1,10 @@
 # Demo测试，为了简化代码这个目前仅仅支持单卡的版本
 from cProfile import label
 from cmath import cos, inf
-from .loss import *
-from utils.config import *
-from utils.utils import *
+from loss import CriterionDSN, CriterionPixelWise, CriterionPairWiseforWholeFeatAfterPool
+from utils.config import ConfigDict
+from utils.utils import AverageMeter
+from utils.config import Config
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.autograd as autograd
@@ -11,10 +12,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from .pspnet import Res_pspnet, Bottleneck
+from pspnet import Res_pspnet
 import torch
-from torch.utils.tensorboard import SummaryWriter
-import tqdm
+from torch.utils.tensorboard.writer import SummaryWriter
+from tqdm import tqdm
 import numpy as np
 from utils.logging import get_logger
 from dataset.RGBT import MSDataSet
@@ -65,7 +66,7 @@ class Trainer:
         self.test_loader = DataLoader(
             MSDataSet(cfg=self.cfg, mode="test"), batch_size=cfg.test_batch, num_worker=4, pin_memory=True
         )
-        self.logger = get_logger(log_file=log_path)
+        self.logger = get_logger("DML", log_file=log_path)
         self.tensor_writer = SummaryWriter(log_dir=log_path, comment="QAQ")
         self.v_loss = 0.0
         self.t_loss = 0.0
@@ -77,7 +78,45 @@ class Trainer:
         self.pa_G_loss = 0.0
         cudnn.benchmark = True
 
-    def training(self, epoch):
+    # 训练之前两个分支独自学习
+    def train_self_branch(self, epoch):
+        self.visible.train()
+        self.thermal.train()
+        # 切换到训练模式
+
+        losses = [AverageMeter() for i in range(2)]
+        tbar = tqdm(enumerate(self.train_loader))
+        for batch_index, (rgb_img, infrared_img, mask) in tbar:
+            rgb_img = rgb_img.cuda()
+            infrared_img = infrared_img.cuda()
+            # 全部给上张量，这个时候开始算loss
+            predict_rgb = self.visible(rgb_img)
+            predict_thermal = self.thermal(infrared_img)
+            # Todo: Holistic Loss,下面是红外网络的Demo
+            # 红外loss
+            BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
+            losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
+
+            # 可见光网络的Loss
+            BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
+            losses[1].update(BCE_visible.item(), self.cfg.train_batch)
+
+            # 红外反向传播
+            self.t_solver.zero_grad()
+            BCE_thermal.backward()
+            self.t_solver.step()
+            self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
+            # 可见光反向传播
+            self.v_solver.zero_grad()
+            BCE_visible.backward()
+            self.v_solver.step()
+            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+        self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
+        self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
+        self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
+        self.tensor_writer.add_scalar("train_self_branch:Visible_loss/BCE_Visible", losses[1].avg, epoch)
+
+    def DML_training(self, epoch):
 
         self.visible.train()
         self.thermal.train()
@@ -86,7 +125,7 @@ class Trainer:
         if self.cfg.cps_flag:
             cps_avg = AverageMeter()
         losses = [AverageMeter() for i in range(8)]
-        tbar = tqdm(enumerate(self.dataloader))
+        tbar = tqdm(enumerate(self.train_loader))
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
             rgb_img = rgb_img.cuda()
             infrared_img = infrared_img.cuda()
@@ -125,18 +164,18 @@ class Trainer:
                 thermal_loss = thermal_loss + cps_loss
                 visible_loss = visible_loss + cps_loss
                 cps_avg.update(cps_loss.item(), self.cfg.train_batch)
-                self.tensor_writer.add_scalar("cps loss",)
+                self.tensor_writer.add_scalar("cps loss", cps_avg)
             # 红外反向传播
             self.t_solver.zero_grad()
 
             thermal_loss.backward()
             self.t_solver.step()
-            self.t_scheduler.step(len(self.dataloader) * epoch + batch_index)
+            self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # 可见光反向传播
             self.v_solver.zero_grad()
             visible_loss.backward()
             self.v_solver.step()
-            self.v_scheduler.step(len(self.dataloader) * epoch + batch_index)
+            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
         self.logger.info(
             "Epoch {}: Thermal  BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:".format(
                 epoch, losses[0].avg, losses[1].avg, losses[2].avg, losses[3].avg
@@ -168,5 +207,39 @@ class Trainer:
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
+    def testing(self, epoch):
+        self.visible.eval()
+        self.thermal.eval()
+        # 切换到训练模式
+
+        losses = [AverageMeter() for i in range(2)]
+        tbar = tqdm(enumerate(self.train_loader))
+
+        for batch_index, (rgb_img, infrared_img, mask) in tbar:
+            with torch.no_grad():
+                rgb_img = rgb_img.cuda()
+                infrared_img = infrared_img.cuda()
+                # 全部给上张量，这个时候开始算loss
+                predict_rgb = self.visible(rgb_img)
+                predict_thermal = self.thermal(infrared_img)
+                # Todo: Holistic Loss,下面是红外网络的Demo
+                # 红外loss
+                BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
+                losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
+
+                # 可见光网络的Loss
+                BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
+                losses[1].update(BCE_visible.item(), self.cfg.train_batch)
+
+        self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
+        self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
+        self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
+        self.tensor_writer.add_scalar("train_self_branch:Visible_loss/BCE_Visible", losses[1].avg, epoch)
+
     def validation(self, epoch):
         pass
+
+
+def main():
+    cfg = Config.fromfile(r"/home/guoshibo/DML_Segmentation/Config/dml_esp.py")
+    print(cfg)

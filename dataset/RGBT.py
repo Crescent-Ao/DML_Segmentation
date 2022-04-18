@@ -61,10 +61,10 @@ class MSDataSet(Dataset):
         mask = Image.open(osp.join(self.mask_path, self.cur_list[index]))
         if self.mode == "train":
             augumentation = self.augtransform_train(image=img, mask=mask)
-        elif self.mode == "test":
-            augumentation = self.augtransform_test(image=img, mask=mask)
-        img = augumentation["image"]
-        mask = augumentation["mask"]
+            img = augumentation["image"]
+            mask = augumentation["mask"]
+        # elif self.mode == "test":
+        #     augumentation = self.augtransform_test(image=img, mask=mask)
         rgb_img = img[:, :, :3]
         infrared = np.expand_dims(img[:, :, 3], axis=-1)
         infrared = np.concatenate([infrared, infrared, infrared], axis=-1)

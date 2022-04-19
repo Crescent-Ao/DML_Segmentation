@@ -40,11 +40,11 @@ class MSDataSet(Dataset):
         print(mode, len(self.cur_list))
         self.augtransform_train = A.Compose(
             [
-                # A.Resize(height=cfg.height, width=cfg.width, interpolation=cv2.INTER_CUBIC, p=1),
-                A.HorizontalFlip(p=0.5),
-                A.VerticalFlip(p=0.5),
-                A.RandomRotate90(p=0.5),
-                A.Transpose(p=0.5),
+                A.Resize(height=cfg.height, width=cfg.width, interpolation=cv2.INTER_CUBIC, p=1),
+                # A.HorizontalFlip(p=0.5),
+                # A.VerticalFlip(p=0.5),
+                # A.RandomRotate90(p=0.5),
+                # A.Transpose(p=0.5),
                 # Todo RandomCrop
                 # Todo CutMix @圈圈师姐
             ]
@@ -59,28 +59,29 @@ class MSDataSet(Dataset):
                 # Todo CutMix @圈圈师姐
             ]
         )
-        self.transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
+        # self.transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
         # 最最最简单的数据增强的实现
 
     def __getitem__(self, index):
         img = np.array(Image.open(osp.join(self.image_path, self.cur_list[index] + ".png")))
         mask = np.array(Image.open(osp.join(self.mask_path, self.cur_list[index] + ".png")))
         augumentation = A.Compose([])
-        print(self.cur_list[index])
+        # print(self.cur_list[index])
+
         if self.mode == "train":
             augumentation = self.augtransform_train(image=img, mask=mask)
         img = augumentation["image"]
         mask = augumentation["mask"]
+
         # elif self.mode == "test":
         #     augumentation = self.augtransform_test(image=img, mask=mask)
         rgb_img = img[:, :, :3]
         infrared = np.expand_dims(img[:, :, 3], axis=-1)
         infrared = np.concatenate([infrared, infrared, infrared], axis=-1)
         # 在这个尺度上进行对应的concate操作
-        rgb_img = self.transform(img).permute(-1, 0, 1)
-        infrared = self.transform(infrared).permute(-1, 0, 1)
-        mask = self.transform(mask)
-
+        rgb_img = torch.from_numpy(rgb_img).permute(-1, 0, 1).float()
+        infrared = torch.from_numpy(infrared).permute(-1, 0, 1).float()
+        mask = torch.from_numpy(mask).float()
 
         return rgb_img, infrared, mask
         # Todo 随机剪裁和多尺度测试还没有做

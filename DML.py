@@ -1,27 +1,28 @@
 # Demo测试，为了简化代码这个目前仅仅支持单卡的版本
-from cProfile import label
+import os
 from cmath import cos, inf
-from model.loss import CriterionDSN, CriterionPixelWise, CriterionPairWiseforWholeFeatAfterPool
-from utils.config import ConfigDict
-from utils.utils import AverageMeter, mkdir_exp, save_ckpt
-from utils.config import Config
-from torch.autograd import Variable
-import torch.backends.cudnn as cudnn
+from cProfile import label
+
+import numpy as np
+import torch
 import torch.autograd as autograd
+import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.autograd import Variable
 from torch.utils.data import DataLoader
-
-# from pspnet import Res_pspnet
-import torch
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-import numpy as np
-from utils.logging import get_logger
+
 from dataset.RGBT import MSDataSet
+from model.loss import (CriterionDSN, CriterionPairWiseforWholeFeatAfterPool,
+                        CriterionPixelWise)
+from model.pspnet import Res_pspnet
 from model.Unet import UNet
-import os
+from utils.config import Config, ConfigDict
+from utils.logging import get_logger
+from utils.utils import AverageMeter, mkdir_exp, save_ckpt
 
 seed = 42
 np.random.seed(seed)
@@ -33,10 +34,10 @@ class Trainer:
     def __init__(self, cfg, log_path):
         # Todo：目前仅仅是单卡的版本，多卡版本应该是可见光一个模型，红外一个模型
         self.cfg = cfg
-        # self.visible = Res_pspnet(cfg.visible.Block, cfg.visible.Block_num, num_classes=cfg.classes)
-        # self.thermal = Res_pspnet(cfg.thermal.Block, cfg.thermal.Block_num, num_classes=cfg.classes)
-        self.visible = UNet(3, n_classes=cfg.classes)
-        self.thermal = UNet(3, n_classes=cfg.classes)
+        self.visible = Res_pspnet(layers=cfg.visible.Block_num, num_classes=cfg.classes)
+        self.thermal = Res_pspnet(layers=cfg.thermal.Block_num, num_classes=cfg.classes)
+        # self.visible = UNet(3, n_classes=cfg.classes)
+        # self.thermal = UNet(3, n_classes=cfg.classes)
         # Todo: 对抗学习策略目前还没有采用，只初始化了两个迭代器
         self.v_solver = optim.SGD(
             [{"params": filter(lambda p: p.requires_grad, self.visible.parameters()), "initial_lr": cfg.lr_v}],
@@ -92,18 +93,22 @@ class Trainer:
         losses = [AverageMeter() for i in range(2)]
         tbar = tqdm(enumerate(self.train_loader))
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
+            # print(rgb_img.shape, "rgb")
+            # print(infrared_img.shape, "infrared")
+            # print(mask.shape, "mask")
             rgb_img = rgb_img.cuda()
             infrared_img = infrared_img.cuda()
+            mask = mask.cuda()
             # 全部给上张量，这个时候开始算loss
             predict_rgb = self.visible(rgb_img)
             predict_thermal = self.thermal(infrared_img)
             # Todo: Holistic Loss,下面是红外网络的Demo
             # 红外loss
-            BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
+            BCE_thermal = self.criterion(predict_thermal[1].long(), mask.long())
             losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
 
             # 可见光网络的Loss
-            BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
+            BCE_visible = self.criterion(predict_rgb[1].long(), mask.long())
             losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
             # 红外反向传播
@@ -257,13 +262,18 @@ def main():
     for epoch in range(start_epoch, cfg.self_branch_epochs):
         trainer.train_self_branch(epoch)
 
-
     for epoch in range(start_epoch, cfg.epochs):
         trainer.DML_training(epoch)
         if epoch % trainer.cfg.ckpt_freq == 0:
             save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
-            torch.save(trainer.visible.state_dict(), os.path.join(os.path.join(weight_path, "weight_visible_%s.pth" % (str(epoch)))))
-            torch.save(trainer.thermal.state_dict(), os.path.join(os.path.join(weight_path, "weight_thermal_%s.pth" % (str(epoch)))))
+            torch.save(
+                trainer.visible.state_dict(),
+                os.path.join(os.path.join(weight_path, "weight_visible_%s.pth" % (str(epoch)))),
+            )
+            torch.save(
+                trainer.thermal.state_dict(),
+                os.path.join(os.path.join(weight_path, "weight_thermal_%s.pth" % (str(epoch)))),
+            )
 
         trainer.testing(epoch)
 

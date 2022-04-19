@@ -8,5 +8,3 @@ from utils.config import Config
 
 cfg = Config.fromfile(r"/home/guoshibo/DML_Segmentation/Config/dml_esp.py")
 print(cfg)
-
-

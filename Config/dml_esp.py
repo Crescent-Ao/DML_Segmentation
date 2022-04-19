@@ -27,7 +27,7 @@ thermal = {
     "lambda_3": 1,
 }
 pool_scale = 5
-train_batch = 8
+train_batch = 2
 test_batch = 1
 height = 480
 width = 640

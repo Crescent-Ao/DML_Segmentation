@@ -8,7 +8,13 @@ cps_flag = True
 ckpt_freq = 20
 self_branch_epochs = 20
 DML_epochs = 100
-multi_scale = False
+multi_scale = True
+## 新增支持CWD
+CWD = {
+    'norm_type':'channel',
+    'divergence':'kl',
+    'temperature':'3',
+}
 visible = {
     "Block": "Bottleneck",
     "Block_num": [3, 4, 23, 3],
@@ -28,7 +34,7 @@ thermal = {
     "lambda_3": 1,
 }
 pool_scale = 5
-train_batch = 2
+train_batch = 10
 test_batch = 1
 # 这个是随机裁剪之后的尺度的高宽
 height = 320

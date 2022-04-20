@@ -91,7 +91,7 @@ class MSDataSet(Dataset):
     @staticmethod
     def multi_scale_label(rgb_img,infrared_img,mask):
         # 多尺度测试的方式
-        f_scale = 0.5 + random.randint(0, 11) / 10.0
+        f_scale = 0.5 + random.randint(0, 15) / 10.0
         rgb_img = cv2.resize(rgb_img,None,fx = f_scale,fy = f_scale, interpolation=cv2.INTER_LINEAR)
         infrared_img = cv2.resize(infrared_img,None,fx = f_scale,fy = f_scale, interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, None, fx=f_scale,fy=f_scale,interpolation = cv2.INTER_NEAREST)

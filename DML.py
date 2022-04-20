@@ -16,8 +16,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from dataset.RGBT import MSDataSet
-from model.loss import (CriterionDSN, CriterionPairWiseforWholeFeatAfterPool,
-                        CriterionPixelWise)
+from model.loss import *
 from model.pspnet import Res_pspnet
 from model.Unet import UNet
 from utils.config import Config, ConfigDict
@@ -58,9 +57,12 @@ class Trainer:
             self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
-        self.criterion = CriterionDSN()  # BCE
-        self.criterion_pixel = CriterionPixelWise()
-        self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
+        self.criterion = CriterionDSN().cuda()  # BCE
+        self.criterion_pixel = CriterionKD().cuda()
+        self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5).cuda()
+        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature).cuda()
+
+
         # 引入CPS loss
         self.criterion_cps = nn.CrossEntropyLoss(reduction="mean")
         self.thermal.cuda()
@@ -244,7 +246,10 @@ class Trainer:
                 BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
                 losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
-                # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,
+                # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,完成
+                # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staicMethod的方式
+                # Todo log目前先不同实现
+
 
         self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)

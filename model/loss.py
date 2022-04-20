@@ -262,7 +262,21 @@ def sim_dis_compute(f_S, f_T):
     sim_dis = sim_err.sum()
     return sim_dis
 
+class SpatialNorm(nn.Module):
+    def __init__(self,divergence='kl'):
+        if divergence =='kl':
+            self.criterion = nn.KLDivLoss()
+        else:
+            self.criterion = nn.MSELoss()
 
+        self.norm = nn.Softmax(dim=-1)
+    
+    def forward(self,pred_S,pred_T):
+        norm_S = self.norm(pred_S)
+        norm_T = self.norm(pred_T)
+
+        loss = self.criterion(pred_S,pred_T)
+        return loss
 class CriterionPairWiseforWholeFeatAfterPool(nn.Module):
     def __init__(self, scale, feat_ind):
         """inter pair-wise loss from inter feature maps"""
@@ -282,4 +296,111 @@ class CriterionPairWiseforWholeFeatAfterPool(nn.Module):
             kernel_size=(patch_w, patch_h), stride=(patch_w, patch_h), padding=0, ceil_mode=True
         )  # change
         loss = self.criterion(maxpool(feat_S), maxpool(feat_T))
+        return loss
+class CriterionCWD(nn.Module):
+
+    def __init__(self,norm_type='none',divergence='mse',temperature=1.0):
+    
+        super(CriterionCWD, self).__init__()
+       
+
+        # define normalize function
+        if norm_type == 'channel':
+            self.normalize = ChannelNorm()
+        elif norm_type =='spatial':
+            self.normalize = nn.Softmax(dim=1)
+        elif norm_type == 'channel_mean':
+            self.normalize = lambda x:x.view(x.size(0),x.size(1),-1).mean(-1)
+        else:
+            self.normalize = None
+        self.norm_type = norm_type
+
+        self.temperature = 1.0
+
+        # define loss function
+        if divergence == 'mse':
+            self.criterion = nn.MSELoss(reduction='sum')
+        elif divergence == 'kl':
+            self.criterion = nn.KLDivLoss(reduction='sum')
+            self.temperature = temperature
+        self.divergence = divergence
+
+        
+        
+
+    def forward(self,preds_S, preds_T):
+        
+        n,c,h,w = preds_S.shape
+        #import pdb;pdb.set_trace()
+        if self.normalize is not None:
+            norm_s = self.normalize(preds_S/self.temperature)
+            norm_t = self.normalize(preds_T.detach()/self.temperature)
+        else:
+            norm_s = preds_S[0]
+            norm_t = preds_T[0].detach()
+        
+        
+        if self.divergence == 'kl':
+            norm_s = norm_s.log()
+        loss = self.criterion(norm_s,norm_t)
+        
+        #item_loss = [round(self.criterion(norm_t[0][0].log(),norm_t[0][i]).item(),4) for i in range(c)]
+        #import pdb;pdb.set_trace()
+        if self.norm_type == 'channel' or self.norm_type == 'channel_mean':
+            loss /= n * c
+            # loss /= n * h * w
+        else:
+            loss /= n * h * w
+
+        return loss * (self.temperature**2)
+class CriterionKD(nn.Module):
+    '''
+    knowledge distillation loss
+    '''
+
+    def __init__(self, upsample=False, temperature=1):
+        super(CriterionKD, self).__init__()
+        self.upsample = upsample
+        self.temperature = temperature
+        self.criterion_kd = torch.nn.KLDivLoss()
+
+    def forward(self, pred, soft):
+        soft[0].detach()
+        h, w = soft[0].size(2), soft[0].size(3)
+        if self.upsample:
+            scale_pred = F.upsample(input=pred[0], size=(h * 8, w * 8), mode='bilinear', align_corners=True)
+            scale_soft = F.upsample(input=soft[0], size=(h * 8, w * 8), mode='bilinear', align_corners=True)
+        else:
+            scale_pred = pred[0]
+            scale_soft = soft[0]
+        loss = self.criterion_kd(F.log_softmax(scale_pred / self.temperature, dim=1), F.softmax(scale_soft / self.temperature, dim=1))
+        return loss
+class CriterionIFV(nn.Module):
+    def __init__(self, classes):
+        super(CriterionIFV, self).__init__()
+        self.num_classes = classes
+
+    def forward(self, preds_S, preds_T, target):
+        feat_S = preds_S[2]
+        feat_T = preds_T[2]
+        feat_T.detach()
+        size_f = (feat_S.shape[2], feat_S.shape[3])
+        tar_feat_S = nn.Upsample(size_f, mode='nearest')(target.unsqueeze(1).float()).expand(feat_S.size())
+        tar_feat_T = nn.Upsample(size_f, mode='nearest')(target.unsqueeze(1).float()).expand(feat_T.size())
+        center_feat_S = feat_S.clone()
+        center_feat_T = feat_T.clone()
+        for i in range(self.num_classes):
+          mask_feat_S = (tar_feat_S == i).float()
+          mask_feat_T = (tar_feat_T == i).float()
+          center_feat_S = (1 - mask_feat_S) * center_feat_S + mask_feat_S * ((mask_feat_S * feat_S).sum(-1).sum(-1) / (mask_feat_S.sum(-1).sum(-1) + 1e-6)).unsqueeze(-1).unsqueeze(-1)
+          center_feat_T = (1 - mask_feat_T) * center_feat_T + mask_feat_T * ((mask_feat_T * feat_T).sum(-1).sum(-1) / (mask_feat_T.sum(-1).sum(-1) + 1e-6)).unsqueeze(-1).unsqueeze(-1)
+
+        # cosinesimilarity along C
+        cos = nn.CosineSimilarity(dim=1)
+        pcsim_feat_S = cos(feat_S, center_feat_S)
+        pcsim_feat_T = cos(feat_T, center_feat_T)
+
+        # mseloss
+        mse = nn.MSELoss()
+        loss = mse(pcsim_feat_S, pcsim_feat_T)
         return loss

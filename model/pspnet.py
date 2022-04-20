@@ -9,9 +9,9 @@ from torch.autograd import Variable
 affine_par = True
 import functools
 import sys, os
-from libs.bn import InPlaceABNSync
+from inplace_abn import InPlaceABNSync
 
-BatchNorm2d = nn.BatchNorm2d  # functools.partial(InPlaceABNSync, activation="none")
+BatchNorm2d = functools.partial(InPlaceABNSync, activation="identity")
 
 
 def conv3x3(in_planes, out_planes, stride=1):

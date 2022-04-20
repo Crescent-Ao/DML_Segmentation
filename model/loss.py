@@ -404,3 +404,12 @@ class CriterionIFV(nn.Module):
         mse = nn.MSELoss()
         loss = mse(pcsim_feat_S, pcsim_feat_T)
         return loss
+
+class ChannelNorm(nn.Module):
+    def __init__(self):
+        super(ChannelNorm, self).__init__()
+    def forward(self,featmap):
+        n,c,h,w = featmap.shape
+        featmap = featmap.reshape((n,c,-1))
+        featmap = featmap.softmax(dim=-1)
+        return featmap

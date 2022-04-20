@@ -75,13 +75,15 @@ class MSDataSet(Dataset):
 
         # elif self.mode == "test":
         #     augumentation = self.augtransform_test(image=img, mask=mask)
-        rgb_img = img[:, :, :3]
+        rgb_img = img[:, :, :3].astype(np.float32)
         infrared = np.expand_dims(img[:, :, 3], axis=-1)
-        infrared = np.concatenate([infrared, infrared, infrared], axis=-1)
+        infrared = np.concatenate([infrared, infrared, infrared], axis=-1).astype(np.float32)
+        # 转换成
+       
         # 在这个尺度上进行对应的concate操作
-        rgb_img = torch.from_numpy(rgb_img).permute(-1, 0, 1).float()
-        infrared = torch.from_numpy(infrared).permute(-1, 0, 1).float()
-        mask = torch.from_numpy(mask).float()
+        rgb_img = torch.from_numpy(rgb_img).permute(-1, 0, 1)
+        infrared = torch.from_numpy(infrared).permute(-1, 0, 1)
+        mask = torch.from_numpy(mask).long()
 
         return rgb_img, infrared, mask
         # Todo 随机剪裁和多尺度测试还没有做

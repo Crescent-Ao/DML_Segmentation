@@ -1,7 +1,7 @@
 classes = 9
 lr_v = 1e-4
 lr_t = 1e-4
-dataset = '/home/guoshibo/ir_seg_dataset/'
+dataset = '/home/wa/ir_seg_dataset/'
 momentum = 0.9
 weight_decay = 1e-4
 cps_flag = True

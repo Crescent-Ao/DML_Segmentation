@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard.writer import SummaryWriter
+from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from dataset.RGBT import MSDataSet
@@ -103,12 +103,14 @@ class Trainer:
             predict_rgb = self.visible(rgb_img)
             predict_thermal = self.thermal(infrared_img)
             # Todo: Holistic Loss,下面是红外网络的Demo
+     
             # 红外loss
-            BCE_thermal = self.criterion(predict_thermal[1].long(), mask.long())
+           
+            BCE_thermal = self.criterion(predict_thermal, mask)
             losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
 
             # 可见光网络的Loss
-            BCE_visible = self.criterion(predict_rgb[1].long(), mask.long())
+            BCE_visible = self.criterion(predict_rgb, mask)
             losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
             # 红外反向传播
@@ -121,6 +123,7 @@ class Trainer:
             BCE_visible.backward()
             self.v_solver.step()
             self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+           
         self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
@@ -241,6 +244,8 @@ class Trainer:
                 BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
                 losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
+                # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,
+
         self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
@@ -251,7 +256,7 @@ class Trainer:
 
 
 def main():
-    cfg = Config.fromfile(r"/home/guoshibo/DML_Segmentation/Config/dml_esp.py")
+    cfg = Config.fromfile(r"/home/wa/DML_Segmentation/Config/dml_esp.py")
     print(cfg)
     start_epoch = 0
     ckpt_path = mkdir_exp("ckpt")

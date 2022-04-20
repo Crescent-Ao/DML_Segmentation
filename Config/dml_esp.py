@@ -5,9 +5,10 @@ dataset = '/home/wa/ir_seg_dataset/'
 momentum = 0.9
 weight_decay = 1e-4
 cps_flag = True
-ckpt_freq = 10
+ckpt_freq = 20
 self_branch_epochs = 20
 DML_epochs = 100
+multi_scale = False
 visible = {
     "Block": "Bottleneck",
     "Block_num": [3, 4, 23, 3],
@@ -29,5 +30,6 @@ thermal = {
 pool_scale = 5
 train_batch = 2
 test_batch = 1
-height = 480
-width = 640
+# 这个是随机裁剪之后的尺度的高宽
+height = 320
+width = 320

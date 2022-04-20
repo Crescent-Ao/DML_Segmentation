@@ -175,3 +175,5 @@ cython_debug/
 n
 *.pth 
 *.log 
+*.txt
+events.out.tfevents.*

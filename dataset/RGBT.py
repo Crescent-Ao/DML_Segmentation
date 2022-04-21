@@ -40,7 +40,8 @@ class MSDataSet(Dataset):
         self.multi_scale = cfg.multi_scale
         self.augtransform_train = A.Compose(
             [
-                A.RandomCrop(height = cfg.height, width = cfg.width ,p = 1),
+                A.RandomCrop(height = cfg.train_sr.height, width = cfg.test_sr.width ,p = 0.8),
+                A.Resize(height=cfg.train_sr.height, width=cfg.sr.width, p=1),
                 A.HorizontalFlip(p=0.5),
                 # A.VerticalFlip(p=0.5),
                 # A.RandomRotate90(p=0.5),
@@ -49,7 +50,7 @@ class MSDataSet(Dataset):
         )
         self.augtransform_test = A.Compose(
             [
-                A.HorizontalFlip(p=0.5),
+                A.Resize(height=cfg.test_sr.height, width=cfg.test_sr.width)
             ]
         )
         # self.transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
@@ -58,11 +59,13 @@ class MSDataSet(Dataset):
     def __getitem__(self, index):
         img = np.array(Image.open(osp.join(self.image_path, self.cur_list[index] + ".png")))
         mask = np.array(Image.open(osp.join(self.mask_path, self.cur_list[index] + ".png")))
-        augumentation = A.Compose([])
         # print(self.cur_list[index])
 
         if self.mode == "train":
             augumentation = self.augtransform_train(image=img, mask=mask)
+        else:
+            augumentation = self.augtransform_test(image=img, mask=mask)
+        
         img = augumentation["image"]
         mask = augumentation["mask"]
 

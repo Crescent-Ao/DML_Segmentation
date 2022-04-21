@@ -6,9 +6,10 @@ momentum = 0.9
 weight_decay = 1e-4
 cps_flag = False
 ckpt_freq = 5
-self_branch_epochs = 0
+self_branch_epochs = 50
 DML_epochs = 100
 multi_scale = True
+KD_temperature = 3
 ## 新增支持CWD
 CWD = {
     'norm_type':'channel',
@@ -37,5 +38,5 @@ pool_scale = 5
 train_batch = 4
 test_batch = 1
 # 这个是随机裁剪之后的尺度的高宽
-height = 320
-width = 320
+train_sr = {'height':320,'width':320}
+test_sr = {'height':480,'width':640}

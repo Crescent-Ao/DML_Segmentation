@@ -58,7 +58,7 @@ class Trainer:
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
         self.criterion = CriterionDSN() # BCE
-        self.criterion_pixel = CriterionKD()
+        self.criterion_pixel = CriterionKD(temperature=cfg.KD_temperature)
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
         self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature)
 
@@ -281,8 +281,8 @@ def main():
     log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
 
-   # for epoch in range(start_epoch, cfg.self_branch_epochs):
-    #   trainer.train_self_branch(epoch)
+    for epoch in range(start_epoch, cfg.self_branch_epochs):
+        trainer.train_self_branch(epoch)
 
     for epoch in range(cfg.self_branch_epochs, cfg.DML_epochs):
         trainer.DML_training(epoch)

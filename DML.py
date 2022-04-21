@@ -57,10 +57,10 @@ class Trainer:
             self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
-        self.criterion = CriterionDSN().cuda()  # BCE
-        self.criterion_pixel = CriterionKD().cuda()
-        self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5).cuda()
-        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature).cuda()
+        self.criterion = CriterionDSN() # BCE
+        self.criterion_pixel = CriterionKD()
+        self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
+        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature)
 
 
         # 引入CPS loss
@@ -144,16 +144,17 @@ class Trainer:
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
             rgb_img = rgb_img.cuda()
             infrared_img = infrared_img.cuda()
+            mask = mask.cuda()
             # 全部给上张量，这个时候开始算loss
             predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img)
+            predict_thermal = self.thermal(infrared_img)       
             thermal_loss = 0.0
             # Todo: Holistic Loss,下面是红外网络的Demo
-            BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
+            BCE_thermal = self.criterion(predict_thermal, mask)
             losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
-            KL_loss = self.criterion_pixel(predict_thermal, predict_rgb, is_target_scattered=False)
+            KL_loss = self.criterion_pixel(predict_thermal, predict_rgb)
             losses[1].update(KL_loss.item(), self.cfg.train_batch)
-            Pa_loss = self.criterion_pair_wise(predict_thermal, predict_rgb, is_target_scattered=True)
+            Pa_loss = self.criterion_pair_wise(predict_thermal, predict_rgb)
             losses[2].update(Pa_loss.item(), self.cfg.train_batch)
             thermal_loss = (
                 BCE_thermal * self.cfg.thermal.lambda_1
@@ -162,11 +163,11 @@ class Trainer:
             )
             losses[3].update(thermal_loss.item(), self.cfg.train_batch)
             # Todo: 可见光网络的Loss
-            BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
+            BCE_visible = self.criterion(predict_rgb, mask)
             losses[4].update(BCE_visible.item(), self.cfg.train_batch)
-            KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb, is_target_scattered=False)
+            KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
             losses[5].update(KL_loss_2.item(), self.cfg.train_batch)
-            Pa_loss_2 = self.criterion_pair_wise(predict_thermal, predict_rgb, is_target_scattered=True)
+            Pa_loss_2 = self.criterion_pair_wise(predict_thermal, predict_rgb)
             losses[6].update(Pa_loss_2.item(), self.cfg.train_batch)
             visible_loss = (
                 BCE_visible * self.cfg.visible.lambda_1
@@ -183,14 +184,14 @@ class Trainer:
             # 红外反向传播
             self.t_solver.zero_grad()
 
-            thermal_loss.backward()
+            thermal_loss.backward(retain_graph=True)
             self.t_solver.step()
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # 可见光反向传播
-            self.v_solver.zero_grad()
-            visible_loss.backward()
-            self.v_solver.step()
-            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+         #   self.v_solver.zero_grad()
+          #  visible_loss.backward(retain_graph=True)
+         #   self.v_solver.step()
+         #   self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
         self.logger.info(
             "Epoch {}: Thermal  BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:".format(
                 epoch, losses[0].avg, losses[1].avg, losses[2].avg, losses[3].avg
@@ -269,13 +270,14 @@ def main():
     log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
 
-    for epoch in range(start_epoch, cfg.self_branch_epochs):
-        trainer.train_self_branch(epoch)
+   # for epoch in range(start_epoch, cfg.self_branch_epochs):
+        #trainer.train_self_branch(epoch)
 
-    for epoch in range(start_epoch, cfg.epochs):
+    for epoch in range(start_epoch, cfg.DML_epochs):
         trainer.DML_training(epoch)
+        """
         if epoch % trainer.cfg.ckpt_freq == 0:
-            save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
+          #  save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
             torch.save(
                 trainer.visible.state_dict(),
                 os.path.join(os.path.join(weight_path, "weight_visible_%s.pth" % (str(epoch)))),
@@ -285,8 +287,8 @@ def main():
                 os.path.join(os.path.join(weight_path, "weight_thermal_%s.pth" % (str(epoch)))),
             )
 
-        trainer.testing(epoch)
-
+   #     trainer.testing(epoch)
+        """
 
 if __name__ == "__main__":
     main()

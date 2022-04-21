@@ -177,3 +177,4 @@ n
 *.log 
 *.txt
 events.out.tfevents.*
+*.pyc

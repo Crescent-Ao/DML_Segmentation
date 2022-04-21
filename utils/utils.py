@@ -23,16 +23,25 @@ def mkdir_exp(*property):
 
 def save_ckpt(epoch, ckpt_path, trainer, filename=None):
     if filename:
-        save_path = os.path.join(os.path.join(ckpt_path, "%s_ckpt_%s.pth" % (filename, str(epoch))))
+        save_path_rgb = os.path.join(os.path.join(ckpt_path, "%s_ckpt_%s_rgb.pth" % (filename, str(epoch))))
+        save_path_thermal =  os.path.join(os.path.join(ckpt_path, "%s_ckpt_%s_thermal.pth" % (filename, str(epoch))))
     else:
-        save_path = os.path.join(os.path.join(ckpt_path, "ckpt_pat%s.pth" % (str(epoch))))
-    checkpoint = {
-        "net": trainer.model.state_dict(),
-        "optimizer": trainer.optimizer.state_dict(),
+        save_path_rgb = os.path.join(os.path.join(ckpt_path, "ckpt_pat%s_rgb.pth" % (str(epoch))))
+        save_path_thermal = os.path.join(os.path.join(ckpt_path, "ckpt_pat%s_thermal.pth" % (str(epoch))))
+    checkpoint_rgb = {
+        "net": trainer.visible.state_dict(),
+        "optimizer": trainer.v_solver.state_dict(),
         "epoch": epoch,
-        "lr_schedule": trainer.scheduler.state_dict(),
+        "lr_schedule": trainer.v_scheduler.state_dict(),
     }
-    torch.save(checkpoint, save_path)
+    checkpoint_infrared ={
+        "net": trainer.thermal.state_dict(),
+        "optimizer": trainer.t_solver.state_dict(),
+        "epoch": epoch,
+        "lr_schedule": trainer.t_scheduler.state_dict(),
+    }
+    torch.save(checkpoint_rgb, save_path_rgb)
+    torch.save(checkpoint_infrared, save_path_thermal)
 
 
 class AverageMeter(object):

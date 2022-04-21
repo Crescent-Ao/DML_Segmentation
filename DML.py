@@ -146,6 +146,7 @@ class Trainer:
             infrared_img = infrared_img.cuda()
             mask = mask.cuda()
             # 全部给上张量，这个时候开始算loss
+          
             predict_rgb = self.visible(rgb_img)
             predict_thermal = self.thermal(infrared_img)       
             thermal_loss = 0.0
@@ -162,7 +163,16 @@ class Trainer:
                 + Pa_loss * self.cfg.thermal.lambda_3
             )
             losses[3].update(thermal_loss.item(), self.cfg.train_batch)
+            
+            self.t_solver.zero_grad()
+
+            thermal_loss.backward(retain_graph=True)
+            self.t_solver.step()
+            self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # Todo: 可见光网络的Loss
+           
+            predict_rgb = self.visible(rgb_img)
+            predict_thermal = self.thermal(infrared_img) 
             BCE_visible = self.criterion(predict_rgb, mask)
             losses[4].update(BCE_visible.item(), self.cfg.train_batch)
             KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
@@ -181,17 +191,18 @@ class Trainer:
                 visible_loss = visible_loss + cps_loss
                 cps_avg.update(cps_loss.item(), self.cfg.train_batch)
                 self.tensor_writer.add_scalar("cps loss", cps_avg)
+            """
             # 红外反向传播
             self.t_solver.zero_grad()
-
             thermal_loss.backward(retain_graph=True)
             self.t_solver.step()
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
+           """
             # 可见光反向传播
-         #   self.v_solver.zero_grad()
-          #  visible_loss.backward(retain_graph=True)
-         #   self.v_solver.step()
-         #   self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+            self.v_solver.zero_grad()
+            visible_loss.backward(retain_graph=True)
+            self.v_solver.step()
+            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
         self.logger.info(
             "Epoch {}: Thermal  BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:".format(
                 epoch, losses[0].avg, losses[1].avg, losses[2].avg, losses[3].avg
@@ -219,7 +230,7 @@ class Trainer:
         pre_rgb = predict_rgb[0]
         pre_thermal = predict_thermal[0]
         _, maxr = torch.max(predict_rgb, dim=1)
-        _, maxt = torch.max(predict_thermal, 1)
+        _, maxt = torch.max(predict_thermal, dim = 1)
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
@@ -271,24 +282,16 @@ def main():
     trainer = Trainer(cfg, log_path=log_path)
 
    # for epoch in range(start_epoch, cfg.self_branch_epochs):
-        #trainer.train_self_branch(epoch)
+    #   trainer.train_self_branch(epoch)
 
-    for epoch in range(start_epoch, cfg.DML_epochs):
+    for epoch in range(cfg.self_branch_epochs, cfg.DML_epochs):
         trainer.DML_training(epoch)
-        """
+       
         if epoch % trainer.cfg.ckpt_freq == 0:
-          #  save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
-            torch.save(
-                trainer.visible.state_dict(),
-                os.path.join(os.path.join(weight_path, "weight_visible_%s.pth" % (str(epoch)))),
-            )
-            torch.save(
-                trainer.thermal.state_dict(),
-                os.path.join(os.path.join(weight_path, "weight_thermal_%s.pth" % (str(epoch)))),
-            )
-
+            save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
+     
    #     trainer.testing(epoch)
-        """
+        
 
 if __name__ == "__main__":
     main()

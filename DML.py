@@ -57,11 +57,10 @@ class Trainer:
             self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
-        self.criterion = CriterionDSN() # BCE
+        self.criterion = CriterionDSN()  # BCE
         self.criterion_pixel = CriterionKD()
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
-        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature)
-
+        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence, cfg.CWD.temperature)
 
         # 引入CPS loss
         self.criterion_cps = nn.CrossEntropyLoss(reduction="mean")
@@ -105,9 +104,9 @@ class Trainer:
             predict_rgb = self.visible(rgb_img)
             predict_thermal = self.thermal(infrared_img)
             # Todo: Holistic Loss,下面是红外网络的Demo
-     
+
             # 红外loss
-           
+
             BCE_thermal = self.criterion(predict_thermal, mask)
             losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
 
@@ -125,7 +124,7 @@ class Trainer:
             BCE_visible.backward()
             self.v_solver.step()
             self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
-           
+
         self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
@@ -146,9 +145,9 @@ class Trainer:
             infrared_img = infrared_img.cuda()
             mask = mask.cuda()
             # 全部给上张量，这个时候开始算loss
-          
+
             predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img)       
+            predict_thermal = self.thermal(infrared_img)
             thermal_loss = 0.0
             # Todo: Holistic Loss,下面是红外网络的Demo
             BCE_thermal = self.criterion(predict_thermal, mask)
@@ -163,16 +162,15 @@ class Trainer:
                 + Pa_loss * self.cfg.thermal.lambda_3
             )
             losses[3].update(thermal_loss.item(), self.cfg.train_batch)
-            
-            self.t_solver.zero_grad()
 
+            self.t_solver.zero_grad()
             thermal_loss.backward(retain_graph=True)
             self.t_solver.step()
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # Todo: 可见光网络的Loss
-           
+
             predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img) 
+            predict_thermal = self.thermal(infrared_img)
             BCE_visible = self.criterion(predict_rgb, mask)
             losses[4].update(BCE_visible.item(), self.cfg.train_batch)
             KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
@@ -230,7 +228,7 @@ class Trainer:
         pre_rgb = predict_rgb[0]
         pre_thermal = predict_thermal[0]
         _, maxr = torch.max(predict_rgb, dim=1)
-        _, maxt = torch.max(predict_thermal, dim = 1)
+        _, maxt = torch.max(predict_thermal, dim=1)
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
@@ -259,21 +257,20 @@ class Trainer:
                 losses[1].update(BCE_visible.item(), self.cfg.train_batch)
 
                 # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,完成
-                # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staicMethod的方式
+                # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staticMethod的方式
                 # Todo log目前先不同实现
-
 
         self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
         self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
 
-    def validation(self, epoch):
-        pass
+
 
 
 def main():
-    cfg = Config.fromfile(r"/home/wa/DML_Segmentation/Config/dml_esp.py")
+    cfg_path = os.path.join(os.getcwd(), "Config/dml_esp.py")
+    cfg = Config.fromfile(cfg_path)
     print(cfg)
     start_epoch = 0
     ckpt_path = mkdir_exp("ckpt")
@@ -281,17 +278,18 @@ def main():
     log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
 
-   # for epoch in range(start_epoch, cfg.self_branch_epochs):
-    #   trainer.train_self_branch(epoch)
+    for epoch in range(start_epoch, cfg.self_branch_epochs):
+        trainer.train_self_branch(epoch)
 
     for epoch in range(cfg.self_branch_epochs, cfg.DML_epochs):
         trainer.DML_training(epoch)
-       
+
         if epoch % trainer.cfg.ckpt_freq == 0:
             save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
-     
-   #     trainer.testing(epoch)
-        
+
+
+    # trainer.testing(epoch)
+
 
 if __name__ == "__main__":
     main()

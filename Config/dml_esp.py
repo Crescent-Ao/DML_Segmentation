@@ -1,19 +1,21 @@
+import os
+
 classes = 9
 lr_v = 1e-4
 lr_t = 1e-4
-dataset = '/home/wa/ir_seg_dataset/'
+dataset = os.path.join(os.path.join(os.getcwd(), ".."), "ir_seg_dataset/")
 momentum = 0.9
 weight_decay = 1e-4
 cps_flag = False
 ckpt_freq = 5
-self_branch_epochs = 0
+self_branch_epochs = 1
 DML_epochs = 100
 multi_scale = True
-## 新增支持CWD
+# 新增支持CWD
 CWD = {
-    'norm_type':'channel',
-    'divergence':'kl',
-    'temperature':'3',
+    "norm_type": "channel",
+    "divergence": "kl",
+    "temperature": "3",
 }
 visible = {
     "Block": "Bottleneck",

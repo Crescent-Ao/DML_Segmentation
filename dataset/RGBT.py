@@ -40,8 +40,8 @@ class MSDataSet(Dataset):
         self.multi_scale = cfg.multi_scale
         self.augtransform_train = A.Compose(
             [
-                A.RandomCrop(height = cfg.train_sr.height, width = cfg.test_sr.width ,p = 0.8),
-                A.Resize(height=cfg.train_sr.height, width=cfg.sr.width, p=1),
+                A.RandomCrop(height = cfg.train_sr.height, width = cfg.train_sr.width ,p = 0.8),
+                A.Resize(height=cfg.train_sr.height, width=cfg.train_sr.width, p=1),
                 A.HorizontalFlip(p=0.5),
                 # A.VerticalFlip(p=0.5),
                 # A.RandomRotate90(p=0.5),

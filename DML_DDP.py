@@ -60,7 +60,7 @@ class _RepeatSampler(object):
 
 
 class Trainer:
-    def __init__(self, cfg, log_path, gpu_id):
+    def __init__(self, cfg, log_path, gpu_id = 0):
         self.cfg = cfg
         self.logger = get_logger("DML", log_file=log_path)
         gpu.init_seeds(1 + RANK)
@@ -88,9 +88,10 @@ class Trainer:
         self.thermal = Res_pspnet(layers=cfg.thermal.Block_num, num_classes=cfg.classes)
         self.thermal = nn.SyncBatchNorm.convert_sync_batchnorm(self.thermal).to(device)
         self.scaler = amp.grad_scaler(enable=self.cuda)
+        if RANK !=-1:
+            self.visible = DDP(self.visible,device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
+            self.thermal = DDP(self.thermal,device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
 
-        # self.visible = UNet(3, n_classes=cfg.classes)
-        # self.thermal = UNet(3, n_classes=cfg.classes)
         # Todo: 对抗学习策略目前还没有采用，只初始化了两个迭代器
         self.v_solver = optim.SGD(
             [{"params": filter(lambda p: p.requires_grad, self.visible.parameters()), "initial_lr": cfg.lr_v}],
@@ -189,8 +190,6 @@ class Trainer:
             self.scaler.scale(BCE_thermal).backward()
             self.scaler.step(self.t_solver)
             self.t_solver.zero_grad()
-          
-            
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # 可见光反向传播
             self.scaler.scale(BCE_visible).backward()
@@ -220,45 +219,50 @@ class Trainer:
             infrared_img = infrared_img.to(self.device,non_blocking = True)
             mask = mask.to(self.device,non_blocking = True)
             # 全部给上张量，这个时候开始算loss
-          
-            predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img)       
-            thermal_loss = 0.0
-            # Todo: Holistic Loss,下面是红外网络的Demo
-            BCE_thermal = self.criterion(predict_thermal, mask)
-            losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
-            KL_loss = self.criterion_pixel(predict_thermal, predict_rgb)
-            losses[1].update(KL_loss.item(), self.cfg.train_batch)
-            Pa_loss = self.criterion_pair_wise(predict_thermal, predict_rgb)
-            losses[2].update(Pa_loss.item(), self.cfg.train_batch)
-            thermal_loss = (
-                BCE_thermal * self.cfg.thermal.lambda_1
-                + KL_loss * self.cfg.thermal.lambda_2
-                + Pa_loss * self.cfg.thermal.lambda_3
-            )
-            losses[3].update(thermal_loss.item(), self.cfg.train_batch)
+            with amp.autocast(enabled=self.cuda):
+                predict_rgb = self.visible(rgb_img)
+                predict_thermal = self.thermal(infrared_img)       
+                thermal_loss = 0.0
+                # Todo: Holistic Loss,下面是红外网络的Demo
+                BCE_thermal = self.criterion(predict_thermal, mask)
+                losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
+                KL_loss = self.criterion_pixel(predict_thermal, predict_rgb)
+                losses[1].update(KL_loss.item(), self.cfg.train_batch)
+                Pa_loss = self.criterion_pair_wise(predict_thermal, predict_rgb)
+                losses[2].update(Pa_loss.item(), self.cfg.train_batch)
+                thermal_loss = (
+                    BCE_thermal * self.cfg.thermal.lambda_1
+                    + KL_loss * self.cfg.thermal.lambda_2
+                    + Pa_loss * self.cfg.thermal.lambda_3
+                )
+                losses[3].update(thermal_loss.item(), self.cfg.train_batch)
             
-            self.t_solver.zero_grad()
+            
 
-            thermal_loss.backward(retain_graph=True)
-            self.t_solver.step()
+            self.scaler.scale(thermal_loss).backward(retain_graph=True)
+            self.scaler.step(self.t_solver)
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
+            self.t_solver.zero_grad()
             # Todo: 可见光网络的Loss
-           
-            predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img) 
-            BCE_visible = self.criterion(predict_rgb, mask)
-            losses[4].update(BCE_visible.item(), self.cfg.train_batch)
-            KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
-            losses[5].update(KL_loss_2.item(), self.cfg.train_batch)
-            Pa_loss_2 = self.criterion_pair_wise(predict_thermal, predict_rgb)
-            losses[6].update(Pa_loss_2.item(), self.cfg.train_batch)
-            visible_loss = (
-                BCE_visible * self.cfg.visible.lambda_1
-                + KL_loss_2 * self.cfg.visible.lambda_2
-                + Pa_loss_2 * self.cfg.visible.lambda_3
-            )
-            losses[7].update(visible_loss.item(), self.cfg.train_batch)
+            with amp.autocast(enabled=self.cuda):
+                predict_rgb = self.visible(rgb_img)
+                predict_thermal = self.thermal(infrared_img) 
+                BCE_visible = self.criterion(predict_rgb, mask)
+                losses[4].update(BCE_visible.item(), self.cfg.train_batch)
+                KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
+                losses[5].update(KL_loss_2.item(), self.cfg.train_batch)
+                Pa_loss_2 = self.criterion_pair_wise(predict_thermal, predict_rgb)
+                losses[6].update(Pa_loss_2.item(), self.cfg.train_batch)
+                visible_loss = (
+                    BCE_visible * self.cfg.visible.lambda_1
+                    + KL_loss_2 * self.cfg.visible.lambda_2
+                    + Pa_loss_2 * self.cfg.visible.lambda_3
+                )
+                losses[7].update(visible_loss.item(), self.cfg.train_batch)  
+            self.scaler.scale(visible_loss).backward(retain_graph=True)
+            self.scaler.step(self.v_solver)
+            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+            self.v_solver.zero_grad()
             if self.cfg.cps_flag:
                 cps_loss = self.cps_loss(predict_rgb, predict_thermal)
                 thermal_loss = thermal_loss + cps_loss
@@ -273,10 +277,7 @@ class Trainer:
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
            """
             # 可见光反向传播
-            self.v_solver.zero_grad()
-            visible_loss.backward(retain_graph=True)
-            self.v_solver.step()
-            self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
+           
         self.logger.info(
             "Epoch {}: Thermal  BCE:{:.10f}, Pi loss:{:.10f}, Pa loss:{:.10f},Loss:{:.10f}:".format(
                 epoch, losses[0].avg, losses[1].avg, losses[2].avg, losses[3].avg

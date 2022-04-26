@@ -25,21 +25,23 @@ from utils.config import Config, ConfigDict
 from utils.logging import get_logger
 from utils.utils import AverageMeter, mkdir_exp, save_ckpt
 from torch.nn.parallel import DistributedDataParallel as DDP
-import  torch.distributed  as dist
+import torch.distributed as dist
 from prefetch_generator import BackgroundGenerator
 
-LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
-RANK = int(os.getenv('RANK', -1))
-WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
-print(LOCAL_RANK,RANK,WORLD_SIZE,'QAQ')
-#torch.cuda.set_device(1)
+LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
+RANK = int(os.getenv("RANK", -1))
+WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
+print(LOCAL_RANK, RANK, WORLD_SIZE, "QAQ")
+# torch.cuda.set_device(1)
 class DataLoaderX(DataLoader):
     def __iter__(self):
         return BackgroundGenerator(super().__iter__())
+
+
 class InfiniteDataLoader(DataLoaderX):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        object.__setattr__(self, 'batch_sampler', _RepeatSampler(self.batch_sampler))
+        object.__setattr__(self, "batch_sampler", _RepeatSampler(self.batch_sampler))
         self.iterator = super().__iter__()
 
     def __len__(self):
@@ -48,6 +50,7 @@ class InfiniteDataLoader(DataLoaderX):
     def __iter__(self):
         for i in range(len(self)):
             yield next(self.iterator)
+
 
 class _RepeatSampler(object):
     def __init__(self, sampler):
@@ -59,7 +62,7 @@ class _RepeatSampler(object):
 
 
 class Trainer:
-    def __init__(self, cfg, log_path, gpu_id = 1):
+    def __init__(self, cfg, log_path, gpu_id=1):
         self.cfg = cfg
         self.logger = get_logger("DML", log_file=log_path)
 
@@ -67,30 +70,39 @@ class Trainer:
         # device = gpu.select_device_v5(gpu_id, batch_size=cfg.train_batch)
         if LOCAL_RANK != -1:
             torch.cuda.set_device(LOCAL_RANK)
-            device = torch.device('cuda', LOCAL_RANK)
+            device = torch.device("cuda", LOCAL_RANK)
             dist.init_process_group(backend="nccl")
             self.logger.info(f"[init] == local rank: {LOCAL_RANK}, global rank: {RANK} ==")
         # 多卡的版本的实现
         self.device = device
-        self.cuda = self.device.type != 'cpu'
+        self.cuda = self.device.type != "cpu"
         with gpu.torch_distributed_zero_first(LOCAL_RANK):
             self.train_dataset = MSDataSet(cfg=self.cfg, mode="train")
-            self.test_dataset = MSDataSet(cfg=self.cfg, mode='test')
+            self.test_dataset = MSDataSet(cfg=self.cfg, mode="test")
         sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset) if LOCAL_RANK != -1 else None
-        self.train_loader = InfiniteDataLoader(self.train_dataset, batch_size=self.cfg.train_batch//WORLD_SIZE,
-                                                   sampler=sampler, num_workers=4,
-                                                   pin_memory=True, drop_last=True)
-      #  self.test_loader = InfiniteDataLoader(self.test_dataset, batch_size=self.cfg.test_batch//WORLD_SIZE,
-                #                                   sampler=sampler, num_workers=4,
-           #                                        pin_memory=True, drop_last=True)
+        self.train_loader = InfiniteDataLoader(
+            self.train_dataset,
+            batch_size=self.cfg.train_batch // WORLD_SIZE,
+            sampler=sampler,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=True,
+        )
+        #  self.test_loader = InfiniteDataLoader(self.test_dataset, batch_size=self.cfg.test_batch//WORLD_SIZE,
+        #                                   sampler=sampler, num_workers=4,
+        #                                        pin_memory=True, drop_last=True)
         self.visible = Res_pspnet(layers=cfg.visible.Block_num, num_classes=cfg.classes)
         self.visible = nn.SyncBatchNorm.convert_sync_batchnorm(self.visible).to(device)
         self.thermal = Res_pspnet(layers=cfg.thermal.Block_num, num_classes=cfg.classes)
         self.thermal = nn.SyncBatchNorm.convert_sync_batchnorm(self.thermal).to(device)
         self.scaler = amp.GradScaler(enabled=self.cuda)
-        if RANK !=-1:
-            self.visible = DDP(self.visible,device_ids=[LOCAL_RANK], output_device=LOCAL_RANK,find_unused_parameters=True)
-            self.thermal = DDP(self.thermal,device_ids=[LOCAL_RANK], output_device=LOCAL_RANK,find_unused_parameters=True)
+        if RANK != -1:
+            self.visible = DDP(
+                self.visible, device_ids=[LOCAL_RANK], output_device=LOCAL_RANK, find_unused_parameters=True
+            )
+            self.thermal = DDP(
+                self.thermal, device_ids=[LOCAL_RANK], output_device=LOCAL_RANK, find_unused_parameters=True
+            )
 
         # Todo: 对抗学习策略目前还没有采用，只初始化了两个迭代器
         self.v_solver = optim.SGD(
@@ -112,11 +124,10 @@ class Trainer:
             self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
-        self.criterion = CriterionDSN() # BCE
+        self.criterion = CriterionDSN()  # BCE
         self.criterion_pixel = CriterionKD(temperature=cfg.KD_temperature)
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
-        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature)
-
+        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence, cfg.CWD.temperature)
 
         # 引入CPS loss
         self.criterion_cps = nn.CrossEntropyLoss(reduction="mean")
@@ -132,6 +143,7 @@ class Trainer:
         self.pa_G_loss = 0.0
         cudnn.benchmark = True
         cudnn.deterministic = False
+
     def synchronize(self):
         """
         Helper function to synchronize (barrier) among all processes when
@@ -156,6 +168,7 @@ class Trainer:
         else:  # faster, less reproducible
             cudnn.deterministic = False
             cudnn.benchmark = True
+
     # 训练之前两个分支独自学习
     def train_self_branch(self, epoch):
         self.visible.train()
@@ -169,20 +182,20 @@ class Trainer:
             # print(rgb_img.shape, "rgb")
             # print(infrared_img.shape, "infrared")
             # print(mask.shape, "mask")
-            rgb_img = rgb_img.to(self.device,non_blocking = True)
-            infrared_img = infrared_img.to(self.device,non_blocking = True)
-            mask = mask.to(self.device,non_blocking = True)
+            rgb_img = rgb_img.to(self.device, non_blocking=True)
+            infrared_img = infrared_img.to(self.device, non_blocking=True)
+            mask = mask.to(self.device, non_blocking=True)
             # 全部给上张量，这个时候开始算loss
             with amp.autocast():
                 predict_rgb = self.visible(rgb_img)
                 predict_thermal = self.thermal(infrared_img)
                 # Todo: Holistic Loss,下面是红外网络的Demo
-         
+
                 # 红外loss
-               
+
                 BCE_thermal = self.criterion(predict_thermal, mask)
                 losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
-                
+
                 # 可见光网络的Loss
                 BCE_visible = self.criterion(predict_rgb, mask)
                 losses[1].update(BCE_visible.item(), self.cfg.train_batch)
@@ -202,11 +215,12 @@ class Trainer:
             self.scaler.update()
             self.v_solver.zero_grad()
             self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
-        if RANK in [-1, 0]:  
+        if RANK in [-1, 0]:
             self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
             self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
             self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
             self.tensor_writer.add_scalar("train_self_branch:Visible_loss/BCE_Visible", losses[1].avg, epoch)
+
     def DML_training_visible(self, epoch):
         self.visible.train()
         self.thermal.eval()
@@ -219,13 +233,13 @@ class Trainer:
         if RANK != -1:
             self.train_loader.sampler.set_epoch(epoch)
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
-            rgb_img = rgb_img.to(self.device,non_blocking = True)
-            infrared_img = infrared_img.to(self.device,non_blocking = True)
-            mask = mask.to(self.device,non_blocking = True)
+            rgb_img = rgb_img.to(self.device, non_blocking=True)
+            infrared_img = infrared_img.to(self.device, non_blocking=True)
+            mask = mask.to(self.device, non_blocking=True)
             # 全部给上张量，这个时候开始算loss
             with amp.autocast():
                 predict_rgb = self.visible(rgb_img)
-                predict_thermal = self.thermal(infrared_img)     
+                predict_thermal = self.thermal(infrared_img)
                 BCE_visible = self.criterion(predict_rgb, mask)
                 losses[0].update(BCE_visible.item(), self.cfg.train_batch)
                 KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
@@ -237,19 +251,17 @@ class Trainer:
                     + KL_loss_2 * self.cfg.visible.lambda_2
                     + Pa_loss_2 * self.cfg.visible.lambda_3
                 )
-                losses[3].update(visible_loss.item(), self.cfg.train_batch)  
+                losses[3].update(visible_loss.item(), self.cfg.train_batch)
                 if RANK != -1:
                     visible_loss *= WORLD_SIZE
-            
+
             self.scaler.scale(visible_loss).backward()
             self.scaler.step(self.v_solver)
             self.scaler.update()
             self.v_solver.zero_grad()
             self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # Todo: 可见光网络的Loss
-           
-          
-  
+
             if self.cfg.cps_flag:
                 cps_loss = self.cps_loss(predict_rgb, predict_thermal)
                 thermal_loss = thermal_loss + cps_loss
@@ -278,7 +290,7 @@ class Trainer:
             if self.cfg.cps_flag:
                 self.tensor_writer.add_scalar("cps loss", cps_avg.avg, epoch)
                 self.logger.info("Epoch{}: Cps loss{.10f}".format(epoch, cps_avg.avg))
-        
+
     def DML_training_thermal(self, epoch):
 
         self.visible.eval()
@@ -292,13 +304,13 @@ class Trainer:
         if RANK != -1:
             self.train_loader.sampler.set_epoch(epoch)
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
-            rgb_img = rgb_img.to(self.device,non_blocking = True)
-            infrared_img = infrared_img.to(self.device,non_blocking = True)
-            mask = mask.to(self.device,non_blocking = True)
+            rgb_img = rgb_img.to(self.device, non_blocking=True)
+            infrared_img = infrared_img.to(self.device, non_blocking=True)
+            mask = mask.to(self.device, non_blocking=True)
             # 全部给上张量，这个时候开始算loss
             with amp.autocast():
                 predict_rgb = self.visible(rgb_img)
-                predict_thermal = self.thermal(infrared_img)       
+                predict_thermal = self.thermal(infrared_img)
                 thermal_loss = 0.0
                 # Todo: Holistic Loss,下面是红外网络的Demo
                 BCE_thermal = self.criterion(predict_thermal, mask)
@@ -315,16 +327,15 @@ class Trainer:
                 losses[3].update(thermal_loss.item(), self.cfg.train_batch)
                 if RANK != -1:
                     thermal_loss *= WORLD_SIZE
-            
+
             self.scaler.scale(thermal_loss).backward()
             self.scaler.step(self.t_solver)
             self.scaler.update()
             self.t_solver.zero_grad()
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
-           
+
             # Todo: 可见光网络的Loss
-           
-          
+
             if self.cfg.cps_flag:
                 cps_loss = self.cps_loss(predict_rgb, predict_thermal)
                 thermal_loss = thermal_loss + cps_loss
@@ -358,7 +369,7 @@ class Trainer:
         pre_rgb = predict_rgb[0]
         pre_thermal = predict_thermal[0]
         _, maxr = torch.max(predict_rgb, dim=1)
-        _, maxt = torch.max(predict_thermal, dim = 1)
+        _, maxt = torch.max(predict_thermal, dim=1)
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
@@ -390,7 +401,6 @@ class Trainer:
                 # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staicMethod的方式
                 # Todo log目前先不同实现
 
-
         self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
@@ -401,29 +411,28 @@ class Trainer:
 
 
 def main():
-    cfg = Config.fromfile(r"/home/crescent/DML_Segmentation/Config/dml_esp.py")
+    cfg = Config.fromfile(os.path.join(os.getcwd(), "Config/dml_esp.py"))
     print(cfg)
-    start_epoch = 0
-   # ckpt_path = mkdir_exp("ckpt")
-   # weight_path = mkdir_exp("weights")
-    log_path = r'/home/crescent/DML_Segmentation/log/exp8'
+    # start_epoch = 0
+    # ckpt_path = mkdir_exp("ckpt")
+    # weight_path = mkdir_exp("weights")
+    log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
 
-    #for epoch in range(start_epoch, cfg.self_branch_epochs):
-  #      trainer.train_self_branch(epoch)
+    # for epoch in range(start_epoch, cfg.self_branch_epochs):
+    #      trainer.train_self_branch(epoch)
 
     for epoch in range(0, cfg.DML_epochs):
         trainer.DML_training_thermal(epoch)
         trainer.DML_training_visible(epoch)
-       # if epoch % trainer.cfg.ckpt_freq == 0:
-      #      save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
-     
-   #     trainer.testing(epoch)
-        
+    # if epoch % trainer.cfg.ckpt_freq == 0:
+    #      save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
+
+
+    # trainer.testing(epoch)
+
 
 if __name__ == "__main__":
     main()
     if WORLD_SIZE > 1 and RANK == 0:
-       dist.destroy_process_group()
-    
-    
+        dist.destroy_process_group()

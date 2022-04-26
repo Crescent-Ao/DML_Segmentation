@@ -105,9 +105,9 @@ class Trainer:
             predict_rgb = self.visible(rgb_img)
             predict_thermal = self.thermal(infrared_img)
             # Todo: Holistic Loss,下面是红外网络的Demo
-     
+
             # 红外loss
-           
+
             BCE_thermal = self.criterion(predict_thermal, mask)
             losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
 
@@ -125,7 +125,7 @@ class Trainer:
             BCE_visible.backward()
             self.v_solver.step()
             self.v_scheduler.step(len(self.train_loader) * epoch + batch_index)
-           
+
         self.logger.info("train_self_branch:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
         self.tensor_writer.add_scalar("train_self_branch:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info("train_self_branch:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
@@ -146,9 +146,9 @@ class Trainer:
             infrared_img = infrared_img.cuda()
             mask = mask.cuda()
             # 全部给上张量，这个时候开始算loss
-          
+
             predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img)       
+            predict_thermal = self.thermal(infrared_img)
             thermal_loss = 0.0
             # Todo: Holistic Loss,下面是红外网络的Demo
             BCE_thermal = self.criterion(predict_thermal, mask)
@@ -163,16 +163,16 @@ class Trainer:
                 + Pa_loss * self.cfg.thermal.lambda_3
             )
             losses[3].update(thermal_loss.item(), self.cfg.train_batch)
-            
+
             self.t_solver.zero_grad()
 
             thermal_loss.backward(retain_graph=True)
             self.t_solver.step()
             self.t_scheduler.step(len(self.train_loader) * epoch + batch_index)
             # Todo: 可见光网络的Loss
-           
+
             predict_rgb = self.visible(rgb_img)
-            predict_thermal = self.thermal(infrared_img) 
+            predict_thermal = self.thermal(infrared_img)
             BCE_visible = self.criterion(predict_rgb, mask)
             losses[4].update(BCE_visible.item(), self.cfg.train_batch)
             KL_loss_2 = self.criterion_pixel(predict_thermal, predict_rgb)
@@ -273,7 +273,7 @@ class Trainer:
 
 
 def main():
-    cfg = Config.fromfile(r"/home/wa/DML_Segmentation/Config/dml_esp.py")
+    cfg = Config.fromfile(os.path.join(os.getcwd(), "Config/dml_esp.py"))
     print(cfg)
     start_epoch = 0
     ckpt_path = mkdir_exp("ckpt")
@@ -286,12 +286,12 @@ def main():
 
     for epoch in range(cfg.self_branch_epochs, cfg.DML_epochs):
         trainer.DML_training(epoch)
-       
+
         if epoch % trainer.cfg.ckpt_freq == 0:
             save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
-     
+
    #     trainer.testing(epoch)
-        
+
 
 if __name__ == "__main__":
     main()

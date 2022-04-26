@@ -9,7 +9,7 @@ import os
 import albumentations as A
 import torch
 import os.path as osp
-import random 
+import random
 from tqdm import trange
 
 """
@@ -40,7 +40,7 @@ class MSDataSet(Dataset):
         self.multi_scale = cfg.multi_scale
         self.augtransform_train = A.Compose(
             [
-                A.RandomCrop(height = cfg.train_sr.height, width = cfg.train_sr.width ,p = 0.8),
+                A.RandomCrop(height=cfg.train_sr.height, width=cfg.train_sr.width, p=0.8),
                 A.Resize(height=cfg.train_sr.height, width=cfg.train_sr.width, p=1),
                 A.HorizontalFlip(p=0.5),
                 # A.VerticalFlip(p=0.5),
@@ -48,11 +48,7 @@ class MSDataSet(Dataset):
                 A.Transpose(p=0.5),
             ]
         )
-        self.augtransform_test = A.Compose(
-            [
-                A.Resize(height=cfg.test_sr.height, width=cfg.test_sr.width)
-            ]
-        )
+        self.augtransform_test = A.Compose([A.Resize(height=cfg.test_sr.height, width=cfg.test_sr.width)])
         # self.transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
         # 最最最简单的数据增强的实现
 
@@ -65,7 +61,7 @@ class MSDataSet(Dataset):
             augumentation = self.augtransform_train(image=img, mask=mask)
         else:
             augumentation = self.augtransform_test(image=img, mask=mask)
-        
+
         img = augumentation["image"]
         mask = augumentation["mask"]
 
@@ -85,19 +81,21 @@ class MSDataSet(Dataset):
         rgb_img = torch.from_numpy(rgb_img).permute(-1, 0, 1)
         infrared = torch.from_numpy(infrared).permute(-1, 0, 1)
         mask = torch.from_numpy(mask).long()
-        if (self.multi_scale and self.mode =='Train'):
+        if self.multi_scale and self.mode == "Train":
             rgb_img, infrared, mask = MSDataSet.multi_scale_label(rgb_img, infrared, mask)
-            
+
         return rgb_img, infrared, mask
         # Todo 随机剪裁和多尺度测试还没有做，多尺度分布
         # 前三个波段为对应的rgb 波段 后面为对应的可见光波段,Multi-sca
+
     @staticmethod
-    def multi_scale_label(rgb_img,infrared_img,mask):
+    def multi_scale_label(rgb_img, infrared_img, mask):
         # 多尺度测试的方式
         f_scale = 0.5 + random.randint(0, 15) / 10.0
-        rgb_img = cv2.resize(rgb_img,None,fx = f_scale,fy = f_scale, interpolation=cv2.INTER_LINEAR)
-        infrared_img = cv2.resize(infrared_img,None,fx = f_scale,fy = f_scale, interpolation=cv2.INTER_LINEAR)
-        mask = cv2.resize(mask, None, fx=f_scale,fy=f_scale,interpolation = cv2.INTER_NEAREST)
+        rgb_img = cv2.resize(rgb_img, None, fx=f_scale, fy=f_scale, interpolation=cv2.INTER_LINEAR)
+        infrared_img = cv2.resize(infrared_img, None, fx=f_scale, fy=f_scale, interpolation=cv2.INTER_LINEAR)
+        mask = cv2.resize(mask, None, fx=f_scale, fy=f_scale, interpolation=cv2.INTER_NEAREST)
         return (rgb_img, infrared_img, mask)
+
     def __len__(self):
         return len(self.cur_list)

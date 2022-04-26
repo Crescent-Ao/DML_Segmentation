@@ -1,7 +1,9 @@
+import os
+
 classes = 9
 lr_v = 1e-4
 lr_t = 1e-4
-dataset = '/home/crescent/ir_seg_dataset/'
+dataset = os.path.join(os.path.join(os.getcwd(), ".."), "ir_seg_dataset")
 momentum = 0.9
 weight_decay = 1e-4
 cps_flag = False
@@ -10,11 +12,11 @@ self_branch_epochs = 50
 DML_epochs = 100
 multi_scale = True
 KD_temperature = 3
-## 新增支持CWD
+# 新增支持CWD
 CWD = {
-    'norm_type':'channel',
-    'divergence':'kl',
-    'temperature':'3',
+    "norm_type": "channel",
+    "divergence": "kl",
+    "temperature": "3",
 }
 visible = {
     "Block": "Bottleneck",
@@ -38,5 +40,5 @@ pool_scale = 5
 train_batch = 4
 test_batch = 1
 # 这个是随机裁剪之后的尺度的高宽
-train_sr = {'height':320,'width':320}
-test_sr = {'height':480,'width':640}
+train_sr = {"height": 320, "width": 320}
+test_sr = {"height": 480, "width": 640}

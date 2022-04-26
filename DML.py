@@ -10,12 +10,14 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from regex import P
+from tensorboardX import SummaryWriter
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from dataset.RGBT import MSDataSet
+from eval.evaluation import total_intersect_and_union
 from model.loss import *
 from model.pspnet import Res_pspnet
 from model.Unet import UNet
@@ -32,6 +34,8 @@ torch.cuda.manual_seed(seed)
 class Trainer:
     def __init__(self, cfg, log_path):
         # Todo：目前仅仅是单卡的版本，多卡版本应该是可见光一个模型，红外一个模型
+        self.best_thermal_miou = 0.0
+        self.best_visible_miou = 0.0
         self.cfg = cfg
         self.visible = Res_pspnet(layers=cfg.visible.Block_num, num_classes=cfg.classes)
         self.thermal = Res_pspnet(layers=cfg.thermal.Block_num, num_classes=cfg.classes)
@@ -57,11 +61,10 @@ class Trainer:
             self.t_solver, T_0=cfg.thermal.T_0, T_mult=cfg.thermal.T_mult,
         )
         # Todo: 同上对抗学习的技巧还没用上，并且相互编码和解码的奇淫技巧还没用上
-        self.criterion = CriterionDSN() # BCE
+        self.criterion = CriterionDSN()  # BCE
         self.criterion_pixel = CriterionKD(temperature=cfg.KD_temperature)
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
-        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence,cfg.CWD.temperature)
-
+        self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence, cfg.CWD.temperature)
 
         # 引入CPS loss
         self.criterion_cps = nn.CrossEntropyLoss(reduction="mean")
@@ -95,9 +98,8 @@ class Trainer:
         losses = [AverageMeter() for i in range(2)]
         tbar = tqdm(enumerate(self.train_loader))
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
-            # print(rgb_img.shape, "rgb")
-            # print(infrared_img.shape, "infrared")
-            # print(mask.shape, "mask")
+
+
             rgb_img = rgb_img.cuda()
             infrared_img = infrared_img.cuda()
             mask = mask.cuda()
@@ -230,46 +232,104 @@ class Trainer:
         pre_rgb = predict_rgb[0]
         pre_thermal = predict_thermal[0]
         _, maxr = torch.max(predict_rgb, dim=1)
-        _, maxt = torch.max(predict_thermal, dim = 1)
+        _, maxt = torch.max(predict_thermal, dim=1)
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
-    def testing(self, epoch):
+    def testing(self, epoch, weight_path):
         self.visible.eval()
         self.thermal.eval()
         # 切换到训练模式
 
         losses = [AverageMeter() for i in range(2)]
-        tbar = tqdm(enumerate(self.train_loader))
+        tbar = tqdm(enumerate(self.test_loader))
 
+        rgb_result = None
+        thermal_result = None
+        mask_result = None
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
             with torch.no_grad():
+                interp = nn.Upsample(
+                    size=(self.cfg.test_sr.height, self.cfg.test_sr.width), mode="bilinear", align_corners=True
+                )
+
                 rgb_img = rgb_img.cuda()
                 infrared_img = infrared_img.cuda()
+                mask = mask.cuda()
                 # 全部给上张量，这个时候开始算loss
                 predict_rgb = self.visible(rgb_img)
                 predict_thermal = self.thermal(infrared_img)
+
                 # Todo: Holistic Loss,下面是红外网络的Demo
                 # 红外loss
-                BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
-                losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
+                BCE_thermal = self.criterion(predict_thermal, mask)
+                losses[0].update(BCE_thermal.item(), self.cfg.test_batch)
 
                 # 可见光网络的Loss
-                BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
-                losses[1].update(BCE_visible.item(), self.cfg.train_batch)
+                BCE_visible = self.criterion(predict_rgb, mask)
+                losses[1].update(BCE_visible.item(), self.cfg.test_batch)
 
                 # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,完成
                 # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staicMethod的方式
                 # Todo log目前先不同实现
 
+                rgb_heatmap = interp(predict_rgb[0])  # .detach().cpu()
+                thermal_heatmap = interp(predict_thermal[0])  # .detach().cpu()
+                if batch_index == 0:
+                    rgb_result = rgb_heatmap
+                    thermal_result = thermal_heatmap
+                    mask_result = mask
+                else:
+                    rgb_result = torch.cat((rgb_result, rgb_heatmap), 0)
+                    thermal_result = torch.cat((thermal_result, thermal_heatmap), 0)
+                    mask_result = torch.cat((mask_result, mask), 0)
 
-        self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
+        rgb_all_acc, rgb_iou, rgb_miou, rgb_acc, rgb_precision, rgb_recall = total_intersect_and_union(
+            self.cfg.classes, rgb_result, mask_result
+        )
+
+        (
+            thermal_all_acc,
+            thermal_iou,
+            thermal_miou,
+            thermal_acc,
+            thermal_precision,
+            thermal_recall,
+        ) = total_intersect_and_union(self.cfg.classes, thermal_result, mask_result)
+
+        if rgb_miou > self.best_visible_miou:
+            self.best_visible_miou = rgb_iou
+            save_path = os.path.join(
+                os.path.join(weight_path, "rgb_weight_%s_miou%s.pth" % (str(epoch), str(rgb_miou.detach().cpu().float())))
+            )
+            torch.save(self.visible.state_dict(), save_path)
+
+        if thermal_miou > self.best_thermal_miou:
+            self.best_thermal_miou = thermal_miou
+            save_path = os.path.join(
+                os.path.join(weight_path, "thermal_weight_%s_miou%s.pth" % (str(epoch), str(thermal_miou.detach().cpu().float())))
+            )
+            torch.save(self.thermal.state_dict(), save_path)
+
+        self.logger.info(
+            "test:Epoch {}: Thermal  BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
+                epoch,
+                losses[0].avg,
+                thermal_all_acc,
+                thermal_acc,
+                thermal_iou,
+                thermal_miou,
+                thermal_precision,
+                thermal_recall,
+            )
+        )
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
-        self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
+        self.logger.info(
+            "test:Epoch {}: Visible BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
+                epoch, losses[1].avg, rgb_all_acc, rgb_acc, rgb_iou, rgb_miou, rgb_precision, rgb_recall
+            )
+        )
         self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
-
-    def validation(self, epoch):
-        pass
 
 
 def main():
@@ -280,6 +340,7 @@ def main():
     weight_path = mkdir_exp("weights")
     log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
+    trainer.testing(1, weight_path)
 
     for epoch in range(start_epoch, cfg.self_branch_epochs):
         trainer.train_self_branch(epoch)
@@ -290,7 +351,7 @@ def main():
         if epoch % trainer.cfg.ckpt_freq == 0:
             save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
 
-   #     trainer.testing(epoch)
+        trainer.testing(epoch, weight_path)
 
 
 if __name__ == "__main__":

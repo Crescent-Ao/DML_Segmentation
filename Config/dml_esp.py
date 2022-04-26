@@ -8,9 +8,9 @@ momentum = 0.9
 weight_decay = 1e-4
 cps_flag = False
 ckpt_freq = 5
-self_branch_epochs = 50
-DML_epochs = 100
-multi_scale = True
+self_branch_epochs = 1
+DML_epochs = 5
+multi_scale = False
 KD_temperature = 3
 # 新增支持CWD
 CWD = {
@@ -38,7 +38,7 @@ thermal = {
 }
 pool_scale = 5
 train_batch = 4
-test_batch = 1
+test_batch = 2
 # 这个是随机裁剪之后的尺度的高宽
-train_sr = {"height": 320, "width": 320}
-test_sr = {"height": 480, "width": 640}
+train_sr = {"height": 384, "width": 512}
+test_sr = {"height": 384, "width": 512}

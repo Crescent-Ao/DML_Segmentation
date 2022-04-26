@@ -428,7 +428,6 @@ def main():
     # if epoch % trainer.cfg.ckpt_freq == 0:
     #      save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
 
-
     # trainer.testing(epoch)
 
 

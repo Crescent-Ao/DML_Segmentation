@@ -5,13 +5,12 @@ import torch.utils.model_zoo as model_zoo
 import torch
 import numpy as np
 from torch.autograd import Variable
-
+import torch.nn as nn
 affine_par = True
 import functools
 import sys, os
-from inplace_abn import InPlaceABNSync
 
-BatchNorm2d = functools.partial(InPlaceABNSync, activation="identity")
+BatchNorm2d = nn.BatchNorm2d
 
 
 def conv3x3(in_planes, out_planes, stride=1):

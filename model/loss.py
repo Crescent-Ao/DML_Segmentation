@@ -6,7 +6,9 @@ import numpy as np
 from torch.nn import functional as F
 from torch.autograd import Variable
 import scipy.ndimage as nd
-
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 # from utils.utils import sim_dis_compute
 
 """
@@ -16,7 +18,7 @@ import scipy.ndimage as nd
 
 
 class OhemCrossEntropy2d(nn.Module):
-    def __init__(self, ignore_label=255, thresh=0.7, min_kept=100000, factor=8):
+    def __init__(self, ignore_label=0, thresh=0.7, min_kept=100000, factor=8):
         super(OhemCrossEntropy2d, self).__init__()
         self.ignore_label = ignore_label
         self.thresh = float(thresh)
@@ -183,7 +185,7 @@ class CriterionDSN(nn.Module):
     DSN : We need to consider two supervision for the model.
     """
 
-    def __init__(self, ignore_index=255, use_weight=True, reduce=True):
+    def __init__(self, ignore_index=0, use_weight=True, reduce=True):
         super(CriterionDSN, self).__init__()
         self.ignore_index = ignore_index
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduce=reduce)
@@ -207,7 +209,7 @@ class CriterionOhemDSN(nn.Module):
     DSN : We need to consider two supervision for the model.
     """
 
-    def __init__(self, ignore_index=255, thresh=0.7, min_kept=100000, use_weight=True, reduce=True):
+    def __init__(self, ignore_index=0, thresh=0.7, min_kept=100000, use_weight=True, reduce=True):
         super(CriterionOhemDSN, self).__init__()
         self.ignore_index = ignore_index
         self.criterion1 = OhemCrossEntropy2d(ignore_index, thresh, min_kept)
@@ -226,7 +228,7 @@ class CriterionOhemDSN(nn.Module):
 
 
 class CriterionPixelWise(nn.Module):
-    def __init__(self, ignore_index=255, use_weight=True, reduce=True):
+    def __init__(self, ignore_index=0, use_weight=True, reduce=True):
         super(CriterionPixelWise, self).__init__()
         self.ignore_index = ignore_index
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduce=reduce)
@@ -413,3 +415,20 @@ class ChannelNorm(nn.Module):
         featmap = featmap.reshape((n,c,-1))
         featmap = featmap.softmax(dim=-1)
         return featmap
+
+
+class BCEDiceLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input, target):
+        bce = F.binary_cross_entropy_with_logits(input, target)
+        smooth = 1e-5
+        input = torch.sigmoid(input)
+        num = target.size(0)
+        input = input.view(num, -1)
+        target = target.view(num, -1)
+        intersection = (input * target)
+        dice = (2. * intersection.sum(1) + smooth) / (input.sum(1) + target.sum(1) + smooth)
+        dice = 1 - dice.sum() / num
+        return 0.5 * bce + dice

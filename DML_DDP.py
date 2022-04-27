@@ -23,12 +23,11 @@ from model.pspnet import Res_pspnet
 from model.Unet import UNet
 from utils.config import Config, ConfigDict
 from utils.logging import get_logger
-from utils.utils import AverageMeter, mkdir_exp, save_ckpt
+from utils.utils import *
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from prefetch_generator import BackgroundGenerator
 from eval.evaluation import total_intersect_and_union
-
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv("RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
@@ -67,6 +66,8 @@ class _RepeatSampler(object):
 
 class Trainer:
     def __init__(self, cfg, log_path, gpu_id=1):
+        self.best_thermal_miou = 0.0
+        self.best_visible_miou = 0.0
         self.cfg = cfg
         self.logger = get_logger("DML", log_file=log_path)
 
@@ -80,9 +81,15 @@ class Trainer:
         # 多卡的版本的实现
         self.device = device
         self.cuda = self.device.type != "cpu"
+        self.test_loader = DataLoader(
+            MSDataSet(cfg=self.cfg, mode="test"),
+            batch_size=cfg.test_batch,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=True,
+        )
         with gpu.torch_distributed_zero_first(LOCAL_RANK):
             self.train_dataset = MSDataSet(cfg=self.cfg, mode="train")
-            self.test_dataset = MSDataSet(cfg=self.cfg, mode="test")
         sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset) if LOCAL_RANK != -1 else None
         self.train_loader = InfiniteDataLoader(
             self.train_dataset,
@@ -92,9 +99,7 @@ class Trainer:
             pin_memory=True,
             drop_last=True,
         )
-        #  self.test_loader = InfiniteDataLoader(self.test_dataset, batch_size=self.cfg.test_batch//WORLD_SIZE,
-        #                                   sampler=sampler, num_workers=4,
-        #                                        pin_memory=True, drop_last=True)
+
         self.visible = Res_pspnet(layers=cfg.visible.Block_num, num_classes=cfg.classes)
         self.visible = nn.SyncBatchNorm.convert_sync_batchnorm(self.visible).to(device)
         self.thermal = Res_pspnet(layers=cfg.thermal.Block_num, num_classes=cfg.classes)
@@ -132,7 +137,7 @@ class Trainer:
         self.criterion_pixel = CriterionKD(temperature=cfg.KD_temperature)
         self.criterion_pair_wise = CriterionPairWiseforWholeFeatAfterPool(scale=cfg.pool_scale, feat_ind=-5)
         self.criterion_cwd = CriterionCWD(cfg.CWD.norm_type, cfg.CWD.divergence, cfg.CWD.temperature)
-
+        self.criterion_test =  torch.nn.CrossEntropyLoss(ignore_index=0, reduce=True)
         # 引入CPS loss
         self.criterion_cps = nn.CrossEntropyLoss(reduction="mean")
 
@@ -397,17 +402,17 @@ class Trainer:
                 rgb_img = rgb_img.cuda()
                 infrared_img = infrared_img.cuda()
                 mask = mask.cuda()
-                # 全部给上张量，这个时候开始算loss
-                predict_rgb = self.visible(rgb_img)
-                predict_thermal = self.thermal(infrared_img)
+                with amp.autocast():
+                    predict_rgb = self.visible(rgb_img)
+                    predict_thermal = self.thermal(infrared_img)
 
                 # Todo: Holistic Loss,下面是红外网络的Demo
                 # 红外loss
-                BCE_thermal = self.criterion(predict_thermal, mask)
+                BCE_thermal = self.criterion_test(predict_thermal, mask)
                 losses[0].update(BCE_thermal.item(), self.cfg.test_batch)
 
                 # 可见光网络的Loss
-                BCE_visible = self.criterion(predict_rgb, mask)
+                BCE_visible = self.criterion_test(predict_rgb, mask)
                 losses[1].update(BCE_visible.item(), self.cfg.test_batch)
 
                 # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,完成
@@ -438,17 +443,20 @@ class Trainer:
             thermal_recall,
         ) = total_intersect_and_union(self.cfg.classes, thermal_result, mask_result)
 
-        if rgb_miou > self.best_visible_miou:
-            self.best_visible_miou = rgb_iou
+        print(rgb_miou.item(), "rgbmiou")
+        print(self.best_visible_miou, "best miou")
+
+        if rgb_miou.item() > self.best_visible_miou:
+            self.best_visible_miou = rgb_miou.item()
             save_path = os.path.join(
-                os.path.join(weight_path, "rgb_weight_%s_miou%s.pth" % (str(epoch), str(rgb_miou.detach().cpu().float())))
+                os.path.join(weight_path, "rgb_weight_%s_miou%s.pth" % (str(epoch), str(rgb_miou.item())))
             )
             torch.save(self.visible.state_dict(), save_path)
 
-        if thermal_miou > self.best_thermal_miou:
-            self.best_thermal_miou = thermal_miou
+        if thermal_miou.item() > self.best_thermal_miou:
+            self.best_thermal_miou = thermal_miou.item()
             save_path = os.path.join(
-                os.path.join(weight_path, "thermal_weight_%s_miou%s.pth" % (str(epoch), str(thermal_miou.detach().cpu().float())))
+                os.path.join(weight_path, "thermal_weight_%s_miou%s.pth" % (str(epoch), str(thermal_miou.item())))
             )
             torch.save(self.thermal.state_dict(), save_path)
 
@@ -456,18 +464,25 @@ class Trainer:
             "test:Epoch {}: Thermal  BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
                 epoch,
                 losses[0].avg,
-                thermal_all_acc,
-                thermal_acc,
-                thermal_iou,
-                thermal_miou,
-                thermal_precision,
-                thermal_recall,
+                thermal_all_acc.detach().cpu().numpy(),
+                thermal_acc.detach().cpu().numpy(),
+                thermal_iou.detach().cpu().numpy(),
+                thermal_miou.detach().cpu().numpy(),
+                thermal_precision.detach().cpu().numpy(),
+                thermal_recall.detach().cpu().numpy(),
             )
         )
         self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
         self.logger.info(
             "test:Epoch {}: Visible BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
-                epoch, losses[1].avg, rgb_all_acc, rgb_acc, rgb_iou, rgb_miou, rgb_precision, rgb_recall
+                epoch,
+                losses[1].avg,
+                rgb_all_acc.detach().cpu().numpy(),
+                rgb_acc.detach().cpu().numpy(),
+                rgb_iou.detach().cpu().numpy(),
+                rgb_miou.detach().cpu().numpy(),
+                rgb_precision.detach().cpu().numpy(),
+                rgb_recall.detach().cpu().numpy(),
             )
         )
         self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
@@ -478,20 +493,33 @@ def main():
     cfg = Config.fromfile(os.path.join(os.getcwd(), "Config/dml_esp.py"))
     print(cfg)
     start_epoch = 0
-    ckpt_path = mkdir_exp("ckpt", LOCAL_RANK)
-    weight_path = mkdir_exp("weights", LOCAL_RANK)
-    log_path = mkdir_exp("log", LOCAL_RANK)
+    ckpt_path =  get_exp("ckpt")
+    weight_path = get_exp("weights")
+    log_path = get_exp("log")
+
+    print(ckpt_path,"ckpt")
+
 
     trainer = Trainer(cfg, log_path=log_path)
 
-    # for epoch in range(start_epoch, cfg.self_branch_epochs):
-    #      trainer.train_self_branch(epoch)
+    for epoch in range(start_epoch, cfg.self_branch_epochs):
+        trainer.train_self_branch(epoch)
+        if RANK in [-1, 0] and epoch % trainer.cfg.eval_freq == 0:
+            print("testing!!!")
+            trainer.testing(epoch, weight_path)
+        if RANK in [-1, 0] and epoch % trainer.cfg.ckpt_freq == 0:
+            print("save_ckpt!!!")
+            save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
 
-    for epoch in range(0, cfg.DML_epochs):
+    for epoch in range(cfg.self_branch_epochs, cfg.DML_epochs):
         trainer.DML_training_thermal(epoch)
         trainer.DML_training_visible(epoch)
-    # if epoch % trainer.cfg.ckpt_freq == 0:
-    #      save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
+        if RANK in [-1, 0] and epoch % trainer.cfg.eval_freq == 0:
+            print("testing!!!")
+            trainer.testing(epoch, weight_path)
+        if RANK in [-1, 0] and epoch % trainer.cfg.ckpt_freq == 0:
+            print("save_ckpt!!!")
+            save_ckpt(epoch=epoch, ckpt_path=ckpt_path, trainer=trainer)
 
     # trainer.testing(epoch)
 

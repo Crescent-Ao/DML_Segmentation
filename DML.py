@@ -297,15 +297,15 @@ class Trainer:
             thermal_recall,
         ) = total_intersect_and_union(self.cfg.classes, thermal_result, mask_result)
 
-        if rgb_miou > self.best_visible_miou:
-            self.best_visible_miou = rgb_iou
+        if rgb_miou.item() > self.best_visible_miou:
+            self.best_visible_miou = rgb_miou.item()
             save_path = os.path.join(
                 os.path.join(weight_path, "rgb_weight_%s_miou%s.pth" % (str(epoch), str(rgb_miou.detach().cpu().float())))
             )
             torch.save(self.visible.state_dict(), save_path)
 
-        if thermal_miou > self.best_thermal_miou:
-            self.best_thermal_miou = thermal_miou
+        if thermal_miou.item() > self.best_thermal_miou:
+            self.best_thermal_miou = thermal_miou.item()
             save_path = os.path.join(
                 os.path.join(weight_path, "thermal_weight_%s_miou%s.pth" % (str(epoch), str(thermal_miou.detach().cpu().float())))
             )

@@ -1,5 +1,17 @@
 import torch
 import os
+import json
+
+
+def get_exp(*property):
+
+    if len(property) == 1:
+        property_path = os.path.join(os.getcwd(), property[0])
+    else:
+        property_path = os.path.join(os.getcwd(), property[0], property[1])
+    cur_sequence = sorted(list(map(lambda x: int(x[3:]), os.listdir(property_path))))
+    cur_path = os.path.join(property_path, "exp" + str(cur_sequence[-1]))
+    return cur_path
 
 
 def mkdir_exp(*property):
@@ -23,11 +35,13 @@ def mkdir_exp(*property):
 
 def save_ckpt(epoch, ckpt_path, trainer, filename=None):
     if filename:
-        save_path_rgb = os.path.join(os.path.join(ckpt_path, "%s_ckpt_%s_rgb.pth" % (filename, str(epoch))))
-        save_path_thermal = os.path.join(os.path.join(ckpt_path, "%s_ckpt_%s_thermal.pth" % (filename, str(epoch))))
+        save_path_rgb = os.path.join(os.path.join(ckpt_path, "%s_ckpt_epoch%s_rgb.pth" % (filename, str(epoch))))
+        save_path_thermal = os.path.join(
+            os.path.join(ckpt_path, "%s_ckpt_epoch%s_thermal.pth" % (filename, str(epoch)))
+        )
     else:
-        save_path_rgb = os.path.join(os.path.join(ckpt_path, "ckpt_pat%s_rgb.pth" % (str(epoch))))
-        save_path_thermal = os.path.join(os.path.join(ckpt_path, "ckpt_pat%s_thermal.pth" % (str(epoch))))
+        save_path_rgb = os.path.join(os.path.join(ckpt_path, "ckpt_epoch%s_rgb.pth" % (str(epoch))))
+        save_path_thermal = os.path.join(os.path.join(ckpt_path, "ckpt_epoch%s_thermal.pth" % (str(epoch))))
     checkpoint_rgb = {
         "net": trainer.visible.state_dict(),
         "optimizer": trainer.v_solver.state_dict(),

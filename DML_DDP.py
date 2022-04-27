@@ -27,12 +27,16 @@ from utils.utils import AverageMeter, mkdir_exp, save_ckpt
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from prefetch_generator import BackgroundGenerator
+from eval.evaluation import total_intersect_and_union
 
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv("RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 print(LOCAL_RANK, RANK, WORLD_SIZE, "QAQ")
+
 # torch.cuda.set_device(1)
+
+
 class DataLoaderX(DataLoader):
     def __iter__(self):
         return BackgroundGenerator(super().__iter__())
@@ -373,50 +377,111 @@ class Trainer:
         cps_loss = self.criterion_cps(pre_rgb, maxt) + self.criterion_cps(pre_thermal, maxr)
         return cps_loss
 
-    def testing(self, epoch):
+    def testing(self, epoch, weight_path):
         self.visible.eval()
         self.thermal.eval()
         # 切换到训练模式
 
         losses = [AverageMeter() for i in range(2)]
-        tbar = tqdm(enumerate(self.train_loader))
+        tbar = tqdm(enumerate(self.test_loader))
 
+        rgb_result = None
+        thermal_result = None
+        mask_result = None
         for batch_index, (rgb_img, infrared_img, mask) in tbar:
             with torch.no_grad():
+                interp = nn.Upsample(
+                    size=(self.cfg.test_sr.height, self.cfg.test_sr.width), mode="bilinear", align_corners=True
+                )
+
                 rgb_img = rgb_img.cuda()
                 infrared_img = infrared_img.cuda()
+                mask = mask.cuda()
                 # 全部给上张量，这个时候开始算loss
                 predict_rgb = self.visible(rgb_img)
                 predict_thermal = self.thermal(infrared_img)
+
                 # Todo: Holistic Loss,下面是红外网络的Demo
                 # 红外loss
-                BCE_thermal = self.criterion(predict_thermal, mask, is_target_scattered=False)
-                losses[0].update(BCE_thermal.item(), self.cfg.train_batch)
+                BCE_thermal = self.criterion(predict_thermal, mask)
+                losses[0].update(BCE_thermal.item(), self.cfg.test_batch)
 
                 # 可见光网络的Loss
-                BCE_visible = self.criterion(predict_rgb, mask, is_target_scattered=False)
-                losses[1].update(BCE_visible.item(), self.cfg.train_batch)
+                BCE_visible = self.criterion(predict_rgb, mask)
+                losses[1].update(BCE_visible.item(), self.cfg.test_batch)
 
                 # Todo 这边计算多尺度的训练模式，DataSet也要集成多尺度的训练模式,完成
                 # Todo 编程的主体思路如下，实现一个评估类，类中主要的实现方式为@staicMethod的方式
                 # Todo log目前先不同实现
 
-        self.logger.info("test:Epoch {}: Thermal  BCE:{:.10f}:".format(epoch, losses[0].avg,))
-        self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
-        self.logger.info("test:Epoch {}: Visible BCE:{:.10f}:".format(epoch, losses[1].avg))
-        self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
+                rgb_heatmap = interp(predict_rgb[0])  # .detach().cpu()
+                thermal_heatmap = interp(predict_thermal[0])  # .detach().cpu()
+                if batch_index == 0:
+                    rgb_result = rgb_heatmap
+                    thermal_result = thermal_heatmap
+                    mask_result = mask
+                else:
+                    rgb_result = torch.cat((rgb_result, rgb_heatmap), 0)
+                    thermal_result = torch.cat((thermal_result, thermal_heatmap), 0)
+                    mask_result = torch.cat((mask_result, mask), 0)
 
-    def validation(self, epoch):
-        pass
+        rgb_all_acc, rgb_iou, rgb_miou, rgb_acc, rgb_precision, rgb_recall = total_intersect_and_union(
+            self.cfg.classes, rgb_result, mask_result
+        )
+
+        (
+            thermal_all_acc,
+            thermal_iou,
+            thermal_miou,
+            thermal_acc,
+            thermal_precision,
+            thermal_recall,
+        ) = total_intersect_and_union(self.cfg.classes, thermal_result, mask_result)
+
+        if rgb_miou > self.best_visible_miou:
+            self.best_visible_miou = rgb_iou
+            save_path = os.path.join(
+                os.path.join(weight_path, "rgb_weight_%s_miou%s.pth" % (str(epoch), str(rgb_miou.detach().cpu().float())))
+            )
+            torch.save(self.visible.state_dict(), save_path)
+
+        if thermal_miou > self.best_thermal_miou:
+            self.best_thermal_miou = thermal_miou
+            save_path = os.path.join(
+                os.path.join(weight_path, "thermal_weight_%s_miou%s.pth" % (str(epoch), str(thermal_miou.detach().cpu().float())))
+            )
+            torch.save(self.thermal.state_dict(), save_path)
+
+        self.logger.info(
+            "test:Epoch {}: Thermal  BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
+                epoch,
+                losses[0].avg,
+                thermal_all_acc,
+                thermal_acc,
+                thermal_iou,
+                thermal_miou,
+                thermal_precision,
+                thermal_recall,
+            )
+        )
+        self.tensor_writer.add_scalar("test:Thermal_loss/BCE_Thermal", losses[0].avg, epoch)
+        self.logger.info(
+            "test:Epoch {}: Visible BCE:{:.10f} all_all:{} acc:{} iou:{} miou:{} precision:{} recall:{}".format(
+                epoch, losses[1].avg, rgb_all_acc, rgb_acc, rgb_iou, rgb_miou, rgb_precision, rgb_recall
+            )
+        )
+        self.tensor_writer.add_scalar("test:Visible_loss/BCE_Visible", losses[1].avg, epoch)
 
 
 def main():
+    global create_file
     cfg = Config.fromfile(os.path.join(os.getcwd(), "Config/dml_esp.py"))
     print(cfg)
-    # start_epoch = 0
-    # ckpt_path = mkdir_exp("ckpt")
-    # weight_path = mkdir_exp("weights")
-    log_path = mkdir_exp("log")
+    start_epoch = 0
+    ckpt_path = mkdir_exp("ckpt", LOCAL_RANK)
+    weight_path = mkdir_exp("weights", LOCAL_RANK)
+    log_path = mkdir_exp("log", LOCAL_RANK)
+
     trainer = Trainer(cfg, log_path=log_path)
 
     # for epoch in range(start_epoch, cfg.self_branch_epochs):

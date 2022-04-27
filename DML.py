@@ -340,7 +340,6 @@ def main():
     weight_path = mkdir_exp("weights")
     log_path = mkdir_exp("log")
     trainer = Trainer(cfg, log_path=log_path)
-    trainer.testing(1, weight_path)
 
     for epoch in range(start_epoch, cfg.self_branch_epochs):
         trainer.train_self_branch(epoch)

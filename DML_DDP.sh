@@ -1,3 +1,4 @@
+python QAQ.py
 torchrun \
     --standalone \
     --nnodes=1 \
